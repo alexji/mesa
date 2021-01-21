@@ -1778,11 +1778,12 @@
 
 
       real(dp) function get_Ladv(s,k)
+         use eos_lib, only: Radiation_Energy
          type (star_info), pointer :: s
          integer, intent(in) :: k
          real(dp) :: T, Erad, v, r
          T = s% T(k)
-         Erad = crad*T*T*T*T
+         Erad = Radiation_Energy(T)
          if (s% u_flag) then
             v = s% u(k)
          else if (s% v_flag) then

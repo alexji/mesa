@@ -299,6 +299,7 @@
 
       subroutine get_brunt_B(s, species, nz, k, T_face, rho_face, chiT_face, ierr)
          use eos_def, only: num_eos_basic_results, num_eos_d_dxa_results, i_lnPgas
+         use eos_lib, only: Radiation_Pressure
          use eos_support, only: get_eos
 
          type (star_info), pointer :: s
@@ -322,7 +323,7 @@
 
          logT_face = log10(T_face)
          logRho_face = log10(rho_face)
-         Prad_face = crad * T_face*T_face*T_face*T_face / 3
+         Prad_face = Radiation_Pressure(T_face)
 
          if (is_bad_num(logT_face) .or. is_bad_num(logRho_face)) then
             ierr = -1

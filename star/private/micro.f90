@@ -383,6 +383,7 @@ contains
   subroutine store_eos_for_cell(s, k, res, d_dlnd, d_dlnT, d_dxa, ierr)
 
     use eos_def
+    use eos_lib, only: Radiation_Pressure
     use chem_def
     use star_utils, only: eval_csound, write_eos_call_info
 
@@ -433,7 +434,7 @@ contains
        end if
        return
     end if
-    s% Prad(k) = crad * T*T*T*T / 3
+    s% Prad(k) = Radiation_Pressure(T)
     s% P(k) = s% Prad(k) + s% Pgas(k)
     s% lnP(k) = log(s% P(k))
     s% lnS(k) = res(i_lnS)

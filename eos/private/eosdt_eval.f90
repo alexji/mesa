@@ -30,6 +30,7 @@
       use utils_lib, only: is_bad, mesa_error
       use math_lib
       use eosDT_load_tables, only: load_single_eosDT_table_by_id
+      use eosDT_support, only: Prad_
       use eos_HELM_eval
       use eoscms_eval, only: Get_CMS_alfa, get_CMS_for_eosdt
       use skye, only: get_Skye_for_eosdt, get_Skye_alfa
@@ -199,7 +200,7 @@
          end if
          
          Pgas = exp(res(i_lnPgas))
-         Prad = crad*T*T*T*T/3d0
+         Prad = Prad_(T)
          energy = exp(res(i_lnE))
          entropy = exp(res(i_lnS))
          
@@ -274,7 +275,7 @@
          if (ierr /= 0) return
          
          Pgas = exp(res(i_lnPgas))
-         Prad = crad*T*T*T*T/3d0
+         Prad = Prad_(T)
          energy = exp(res(i_lnE))
          entropy = exp(res(i_lnS))
          

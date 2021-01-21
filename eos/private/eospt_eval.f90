@@ -26,6 +26,7 @@
 
       module eosPT_eval
       use eos_def
+      use eosDT_support, only: Prad_
       use const_def
       use math_lib
       use utils_lib, only: mesa_error
@@ -773,7 +774,7 @@
          dlnRho_dlnT_c_Pgas = &
                (-4*df_dlogW_c_T(eosPT_ilnRho) + df_dlogT_c_W(eosPT_ilnRho))/ln10
          
-         Prad = crad*T*T*T*T/3
+         Prad = Prad_(T)
          P = Pgas + Prad
          
          ! dlnPgas_dlnT|Rho = (T/Pgas)*dPgas_dT|Rho
@@ -1183,14 +1184,14 @@
                   dP_dT, dPrad_dT, dPgas_dT, dRho_dPgas, dRho_dT
             include 'formats'
             
-            Prad = crad*T*T*T*T/3
+            Prad = Prad_(T)
             P = Pgas + Prad
             dP_dRho = res(i_chiRho)*P/Rho
             dPgas_dRho = dP_dRho ! const T, so dP_dRho = dPgas_dRho
             dRho_dPgas = 1/dPgas_dRho ! const T
             dlnRho_dlnPgas_c_T = dRho_dPgas*Pgas/Rho ! const T
             
-            dPrad_dT = 4*crad*T*T*T/3
+            dPrad_dT = 4*Prad/T
             dP_dT = res(i_chiT)*P/T
             dPgas_dT = dP_dT - dPrad_dT ! const Rho
             dRho_dT = -dPgas_dT/dPgas_dRho ! const Pgas

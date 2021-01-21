@@ -229,7 +229,7 @@ contains
         L = s% L(1)
 
         if (s%atm_structure(atm_tau,k) >= 2d0/3d0) then
-           Lrad = (16*pi*clight*crad*s%cgrav(k)*m*T*T*T*T*nabla)/(3*P*kap)
+           Lrad = (16*pi*clight*crad*s%cgrav(k)*m*pow4(T)*nabla)/(3*P*kap)
         else
            Lrad = L
         end if
@@ -300,7 +300,7 @@ contains
         L = s%L(k)
 
         if (s%tau(k) >= 2d0/3d0) then
-           Lrad = (16*pi*clight*crad*s%cgrav(k)*m*T*T*T*T*nabla)/(3*P*kap)
+           Lrad = (16*pi*clight*crad*s%cgrav(k)*m*pow4(T)*nabla)/(3*P*kap)
         else
            Lrad = L
         end if

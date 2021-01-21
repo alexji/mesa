@@ -109,15 +109,15 @@
       ! as a convenience
       
       elemental real(dp) function Radiation_Pressure(T)
-         use const_def, only: crad
+         use const_def, only: crad, one_third
          real(dp), intent(in) :: T
-         Radiation_Pressure = crad*T*T*T*T/3d0
+         Radiation_Pressure = one_third*crad*pow4(T)
       end function Radiation_Pressure
       
       elemental real(dp) function Radiation_Energy(T)
          use const_def, only: crad
          real(dp), intent(in) :: T
-         Radiation_Energy = crad*T*T*T*T
+         Radiation_Energy = crad*pow4(T)
       end function Radiation_Energy
       
       
@@ -697,7 +697,7 @@
             dlnT_dlnE_c_Rho, dlnT_dlnd_c_E, &
             dlnPgas_dlnE_c_Rho, dlnPgas_dlnd_c_E, ierr)
          Pgas = exp(res(i_lnPgas))
-         Prad = crad*T*T*T*T/3d0
+         Prad = Radiation_Pressure(T)
          energy = exp(res(i_lnE))
          entropy = exp(res(i_lnS))
       end subroutine eos_gamma_DT_get

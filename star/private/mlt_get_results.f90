@@ -83,6 +83,7 @@
 
          use utils_lib, only: is_bad
          use chem_def, only: chem_isos
+         use eos_lib, only: Radiation_Pressure
          
          type (star_info), pointer :: ss
          integer, intent(in) :: kz
@@ -242,7 +243,7 @@
             return
          end if
 
-         Pr = one_third*crad*T*T*T*T
+         Pr = Radiation_Pressure(T)
          if (debug) write(*,1) 'Pr', Pr
          call set1_dvb(dPr_dvb, &
             0d0, 4d0*Pr*a_00*T_00/T, &
@@ -251,7 +252,7 @@
          !gradr = eval_Paczynski_gradr(P,opacity,L,m,cgrav,Pr,tau,T,r,rho)
          gradr = P*opacity*L / (16*pi*clight*m*cgrav*Pr)
          if (tau < 2d0/3d0) then ! B. Paczynski, 1969, Acta Astr., vol. 19, 1., eqn 14.
-            s_gradr = (2d0*crad*T*T*T*sqrt(r))/(3d0*cgrav*m*rho)*pow(L/(8d0*pi*boltz_sigma), 0.25d0) ! eqn 15
+            s_gradr = (2d0*crad*pow3(T)*sqrt(r))/(3d0*cgrav*m*rho)*pow(L/(8d0*pi*boltz_sigma), 0.25d0) ! eqn 15
             f_gradr = 1d0 - 1.5d0*tau ! Paczynski, 1969, eqn 8
             dilute_factor = (1 + f_gradr*s_gradr*(4*pi*cgrav*clight*m)/(opacity*L))/(1 + f_gradr*s_gradr)
             gradr = gradr*dilute_factor
@@ -413,7 +414,7 @@
             return
          end if
                      
-         radiative_conductivity = (4*crad*clight/3)*T*T*T / (opacity*rho) ! erg / (K cm sec)
+         radiative_conductivity = (4*crad*clight/3)*pow3(T) / (opacity*rho) ! erg / (K cm sec)
          if (debug) write(*,1) 'radiative_conductivity', radiative_conductivity
          d_rc_dvb = radiative_conductivity*(3d0*dT_dvb/T - dRho_dvb/rho - d_opacity_dvb/opacity)
          
@@ -629,7 +630,7 @@
             if (dbg) write(*,*) 'set_thermohaline ' // trim(thermohaline_option)
             
             diff_grad = max(1d-40, grada - gradr) ! positive since Schwarzschild stable               
-            K = 4*crad*clight*T*T*T/(3*opacity*rho) ! thermal conductivity
+            K = 4*crad*clight*pow3(T)/(3*opacity*rho) ! thermal conductivity
             
             if (thermohaline_option == 'Kippenhahn') then
             
@@ -696,7 +697,7 @@
          
          ! Log Lambda for pure H (equation 10 from Proffitt Michaud 93)
          loglambdah = -19.26d0 - 0.5d0*log(rho) + 1.5d0*log(T) - 0.5d0*log(1d0 + 0.5d0*(1+xh)) 
-         nu_rad = 4d0*crad*T*T*T*T/(15d0*clight*opacity*rho*rho) ! radiative viscosity
+         nu_rad = 4d0*crad*pow4(T)/(15d0*clight*opacity*rho*rho) ! radiative viscosity
          nu_mol = 0.406d0*sqrt(amu)*pow(boltzm*T,2.5d0)/(qe4*loglambdah*rho) 
          ! From Spitzer "Physics of Fully Ionized Gases equation 5-54
          ! Assumes pure H. Still trying to work out what it would be for a mixture. 
@@ -1084,7 +1085,7 @@
                   call mesa_error(__FILE__,__LINE__)
                end if
                      
-               A_denom = ff3*crad*clight*T*T*T
+               A_denom = ff3*crad*clight*pow3(T)
                dA_denom_dvb = A_denom*3*dT_dvb/T
                
                A = A_numerator/A_denom                     
@@ -1374,7 +1375,7 @@
             bc = 32 - 24*beta - beta*beta
             d_bc_dvb = - 24*d_beta_dvb - 2*d_beta_dvb*beta
             
-            LG = (16d0/3d0*pi*clight*m*cgrav*crad*T*T*T*T)/(P*opacity)
+            LG = (16d0/3d0*pi*clight*m*cgrav*crad*pow4(T))/(P*opacity)
             d_LG_dvb = LG*(4d0*dT_dvb/T - dP_dvb/P - d_opacity_dvb/opacity)
             
             a0 = alpha*gradL_composition_term*LG
@@ -1656,7 +1657,7 @@
                   end if
                end if
                      
-               A_denom = ff3*crad*clight*T*T*T
+               A_denom = ff3*crad*clight*pow3(T)
                dA_denom_dvb = A_denom*3d0*dT_dvb/T
                
                A = A_numerator/A_denom                     

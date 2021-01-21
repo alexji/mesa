@@ -35,7 +35,7 @@
             T = exp10(logT)
             logP = 20d0
             P = exp10(logP)
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = P - Prad
             logPgas = log10(Pgas)
             call test1_eosPT(Z, X, logPgas, logT, .true., .true., logRho, logP)
@@ -67,7 +67,7 @@
             T = exp10(logT)
             logP = 23d0
             P = exp10(logP)
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = P - Prad
             logPgas = log10(Pgas)
             call test1_eosPT(Z, X, logPgas, logT, .true., .true., logRho, logP)
@@ -171,7 +171,7 @@
             stop 1
          end if
          
-         Prad = crad*T*T*T*T/3
+         Prad = Radiation_Pressure(T)
          P = Pgas + Prad
          logP = log10(P)
          
@@ -1211,7 +1211,7 @@
             rq% logT_all_OPAL = logT_all_OPAL
             write(*,1) 'logT_all_HELM', logT_all_HELM
             call Do_One_TRho(quietly,T,Rho,X,Zinit,dXC,dXO,Y,Z,res) ! opal
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = exp(res(i_lnPgas))
             P = Pgas + Prad
             write(*,1) 'P', P
@@ -1396,7 +1396,7 @@
             end if
 
             T = exp10(log10_T)
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = exp(res(i_lnPgas))
             logP = log10(Prad + Pgas)
             result = T*2d0 ! initial guess
@@ -1425,7 +1425,7 @@
                write(*,1) ' found logT', result_log10
                write(*,1) '  wanted logP', logP
                T = exp10(result_log10)
-               Prad = crad*T*T*T*T/3
+               Prad = Radiation_Pressure(T)
                Pgas = exp(res(i_lnPgas))
                logP = log10(Prad + Pgas)
                write(*,1) '     got logP', logP
@@ -1570,7 +1570,7 @@
             end if
 
             T = exp10(log10_T)
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = exp(res(i_lnPgas))
             logP = log10(Prad + Pgas)
             result = T*2d0 ! initial guess
@@ -1599,7 +1599,7 @@
                write(*,1) ' found logT', result_log10
                write(*,1) '  wanted logP', logP
                T = exp10(result_log10)
-               Prad = crad*T*T*T*T/3
+               Prad = Radiation_Pressure(T)
                Pgas = exp(res(i_lnPgas))
                logP = log10(Prad + Pgas)
                write(*,1) '     got logP', logP
@@ -2215,7 +2215,7 @@
          if (.not. quietly) then
          
             write(*,*) 'eosDT_get'
-            Prad = crad*T*T*T*T/3
+            Prad = Radiation_Pressure(T)
             Pgas = exp(res(i_lnPgas))
             P = Pgas + Prad
             write(*,101) 'P', P

@@ -36,6 +36,11 @@
       
       contains
 
+      elemental real(dp) function Prad_(T)
+         use const_def, only: crad, one_third
+         real(dp), intent(in) :: T
+         Prad_ = one_third*crad*pow4(T)
+      end function Prad_
       
       subroutine Do_EoS_Interpolations( &
              nvlo, nvhi, n, nx, x, ny, y, fin1, i, j, &

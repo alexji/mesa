@@ -142,7 +142,7 @@ contains
 
        ! Eqn. 15
 
-       s = (2._dp*crad*T*T*T*SQRT(R))/(3._dp*cgrav*M*rho)*pow(L/(8._dp*pi*boltz_sigma), 0.25_dp)
+       s = (2._dp*crad*pow3(T)*SQRT(R))/(3._dp*cgrav*M*rho)*pow(L/(8._dp*pi*boltz_sigma), 0.25_dp)
 
        ! Eqn. 8
 
