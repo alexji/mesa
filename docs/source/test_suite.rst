@@ -154,10 +154,34 @@ pre-main sequence to the end of core helium burning.
 This test case checks that the evolution of a 5 Msun, metal-poor Z = 0.008, helium-enriched Y=0.256 model
 executes a blue-loop in the HR diagram and crosses the classical Cepheid instability strip boundaries three times.
 
-:ref:`inlist_7M_prems_to_AGB`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:ref:`7M_prems_to_AGB`
+^^^^^^^^^^^^^^^^^^^^^^
 
 This test case checks that the evolution of a 7 Msun, metal-poor Z = 0.001, model reaches the AGB.
+
+
+:ref:`accreted_material_j`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite example checks the accretion of material and angular momentum onto a 20 Msun model.
+
+:ref:`adjust_net`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite example checks the functionality of the adaptive nuclear reaction network.
+
+
+:ref:`carbon_acc`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite example checks the accretion of carbon onto a pure carbon white dwarf.
+
+:ref:`cburn_inward`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite example checks the inward propagation of a carbon burning front in a 7.5 Msun model.
+
+
 
 
 :ref:`c13_pocket`
