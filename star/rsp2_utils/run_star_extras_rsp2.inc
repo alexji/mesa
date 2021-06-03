@@ -246,6 +246,12 @@
                'max v/cs', period_max_v_div_cs, &                                      ! 8   a11,f9.4
                'max v/vesc', period_max_v_div_vesc                                     ! 9   a13,f9.4
 
+            if (num_periods >= s% RSP2_max_num_periods) then
+               s% termination_code = t_extras_finish_step
+               rsp2_extras_finish_step = terminate
+               return
+            end if
+
             time_started = time_ended
             run_num_steps_end_prev = s% model_number
             run_num_iters_end_prev = s% total_num_solver_iterations
