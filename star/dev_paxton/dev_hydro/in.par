@@ -1,0 +1,54 @@
+
+
+//Time Range//
+T_Start		0.0
+T_End			20
+
+//Output Frequency//
+Num_Reports		1e1
+Num_Snapshots		0
+Num_Checkpoints		2
+Use_Logtime		0
+
+//Grid Dimensions//
+Num_R			256
+R_Min			0.0 
+R_Max			10.0 
+Log_Zoning		2  //0=Uniform, 1=Log, 2=Hybrid
+Log_Radius		3.0	//Only for option 2 of Log_Zoning
+
+Max_Aspect_Short        2.0 
+Max_Aspect_Long         2.0     //Aspect Ratio AMR Refinement Criteria
+
+//Numerical Parameters
+CFL			0.2
+PLM			1.0
+Riemann_Solver		1	//0=HLL, 1=HLLC
+Mesh_Motion		1	//0=Fixed, 1=By Cell, 2=Riemann Solver
+Density_Floor		0.0
+Pressure_Floor		1e-8 
+
+//Hydro Parameters
+Adiabatic_Index		1.666667 
+
+//Gravity Parameters
+Gravity_Switch		1
+Gravity_G		1.0 //6.67428e-8
+Gravity_Pointmass	0.0 //3.02e33
+Gravity_E_Mode		3   //0 = Source term, 3 = Energy term: G m/r
+Gravity_Balanced	1
+
+
+//RT Model Parameters
+Use_RT			0
+Measure_Growth		0
+
+RT_A			1e-3     //1.176e-5
+RT_B			2.5		//1.2
+RT_C			0.2		//0.102
+RT_D			2.0  		//0.0
+
+//Paper 1: A = 1.176e-5, B = 1.2, C = 0.102, D = 0.0
+//Paper 2: A = 1e-3, 	 B = 2.5, C = 0.2,   D = 2.0
+
+

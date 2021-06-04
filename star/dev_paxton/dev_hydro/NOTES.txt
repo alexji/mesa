@@ -1,0 +1,125 @@
+paul.h
+   NUM_Q = 5
+   domain
+      struct param_list theParList
+      struct cell * theCells
+   cell
+      prim[NUM_Q]       RHO rho, PPP Pp, VRR v, XXX mass fraction, AAA alpha_rti
+      cons[NUM_Q]       DDD mass, SRR momentum, TAU total energy (KE + IE + PE), XXX mass of species
+      RKcons[NUM_Q]
+      grad[NUM_Q]
+      riph  - radius at outer edge of cell
+      dr    - radial distance from outer to inner edge of cell
+      miph
+      dm
+      wiph  - grid location velocity ( v is velocity of material currently in cell )
+      pot
+      fgrav
+
+main           main.c
+   setupGrid
+   setupDomain
+   setupCells
+   while( !(theDomain.final_step) ){
+      set_wcell( &theDomain );
+      double dt = getmindt( &theDomain );
+      check_dt( &theDomain , &dt );
+      possiblyOutput
+      timestep( &theDomain , dt );
+   }
+   possiblyOutput
+   generate_log
+   
+setupGrid      gridsetup.c
+   set riph and dr for each cell according to type of zoning
+   uses parameters Num_R, LogZoning, rmin, rmax, LogRadius
+setupDomain    domain.c
+   unpacks parameters
+setupCells     domain.c
+   initialize prim, prim2cons, cons2prim. including grav PE in total energy
+set_wcell      misc.c
+   initialize face wiph to avg of v of adjacent cells 
+getmindt       misc.c
+   set domain dt to min over all cells of mindt*CFL limit
+mindt          euler.c
+   dt = dr/(cs + fabs( vr - w ))   // for lagrangian, vr = w
+   if USE_RT then dt = min(dt, dr*dr/eta)
+check_dt       domain.c
+   make sure don't go beyond tmax.  set final_step if will reach tmax on this step.
+possiblyOutput domain.c
+   output profile, history, photos based on t_init, t_fin, N_rpt, N_chk, Out_LogTime
+generate_log   profiler.c
+   write summary info to logfile
+
+timestep       timestep.c                     change to SSPRK(2,2) Gottlieb_2005, sect 2.1
+   RK_cons = cons // start of stage info 
+   onestep( theDomain , 0.0 ,     dt , 1 , 0 );
+   onestep( theDomain , 0.5 , 0.5*dt , 0 , 1 );
+   update time t and bump count_steps
+onestep        onestep.c
+   adjust_RK_cons                               << move this call to timestep
+   radial_flux
+   add_source
+   if( first_step ) move_cells
+   calc_dr
+   calc_prim
+   if( last_step ) AMR
+   boundary
+adjust_RK_cons    misc.c
+radial_flux       misc.c
+   calculate_mass
+   calculate_pot
+   plm
+   for( i=0 ; i<Nr-1 ; ++i ){    // for each face except surface
+      riemann_flux( cL , cR , r , dA*dt );
+   }
+calculate_mass    gravity.c
+   sets dm and miph at each face
+calculate_pot     gravity.c
+   set pot, grav potential at cell center
+   get_g
+get_g             gravity.c
+   -G*m/r^2 at cell center
+plm               plm.c
+   set c->grad using 3 cells minmod
+   add HSE terms to pressure for riemann well-balancing
+riemann_flux      riemann.c
+add_source        misc.c
+   for( i=0 ; i<Nr ; ++i ){
+      source
+      source_alpha
+   }
+   gravity_addsrc
+source            euler.c
+source_alpha      euler.c
+gravity_addsrc    gravity.c
+move_cells        misc.c
+calc_dr           misc.c
+calc_prim         misc.c
+AMR               misc.c
+boundary          boundary.c
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

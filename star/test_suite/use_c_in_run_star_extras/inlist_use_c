@@ -1,0 +1,38 @@
+
+&star_job
+
+      show_log_description_at_start = .false.
+
+      save_model_when_terminate = .true.
+      save_model_filename = 'final.mod'
+      required_termination_code_string = 'max_model_number'
+
+      !pgstar_flag = .true.
+      
+/ ! end of star_job namelist
+
+&eos
+/ ! end of eos namelist
+
+&kap
+      Zbase = 0.02d0
+/ ! end of kap namelist
+
+&controls
+
+      ! limit max_model_number as part of test_suite
+      max_model_number = 10
+
+      initial_mass = 1.0
+      initial_z = 0.02d0
+
+      photo_interval = 100
+      profile_interval = 100
+      history_interval = 10
+      terminal_interval = 1
+      write_header_frequency = 10
+
+/ ! end of controls namelist
+
+&pgstar
+/ ! end of pgstar namelist

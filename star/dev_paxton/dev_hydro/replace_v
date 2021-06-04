@@ -1,0 +1,7 @@
+#!/bin/bash
+
+cp src_$1/* src
+
+cp make/makefile_$1 make/makefile
+
+
