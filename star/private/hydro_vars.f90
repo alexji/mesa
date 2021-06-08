@@ -414,12 +414,14 @@
          r_surf = s% r(1)
          L_surf = s% L(1)
 
+         s% P_surf = s% Peos(1)
+         s% T_surf = s% T(1)
+
+         call set_phot_info(s) ! sets Teff using L_phot and R_phot
+         Teff = s% Teff
+
          if (s% RSP_flag) then
             lnT_surf = s% lnT(1)
-            s% T_surf = s% T(1)
-            s% P_surf = s% Peos(1)
-            call set_phot_info(s) ! sets Teff using L_phot and R_phot
-            Teff = s% Teff
             dlnT_dL = 0d0
             dlnT_dlnR = 0d0
             dlnT_dlnM = 0d0
@@ -434,13 +436,13 @@
          
          if (s% use_other_surface_PT) then
             call s% other_surface_PT( &
-               s% id, skip_partials, Teff, &
+               s% id, skip_partials, &
                lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
                lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap, &
                ierr)
          else
             call get_surf_PT( &
-               s, skip_partials, need_atm_Psurf, need_atm_Tsurf, Teff, &
+               s, skip_partials, need_atm_Psurf, need_atm_Tsurf, &
                lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
                lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap, &
                ierr)
@@ -453,8 +455,8 @@
          end if
          s% T_surf = exp(lnT_surf)
          s% P_surf = exp(lnP_surf)
-         call set_phot_info(s) ! sets Teff using L_phot and R_phot
-         Teff = s% Teff
+
+         call set_phot_info(s) ! s% T_surf might have changed so call again
 
       end subroutine set_Teff_info_for_eqns
 
@@ -758,7 +760,7 @@
 
       subroutine get_surf_PT( &
             s, skip_partials, &
-            need_atm_Psurf, need_atm_Tsurf, Teff, &
+            need_atm_Psurf, need_atm_Tsurf, &
             lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
             lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap, &
             ierr)
@@ -772,13 +774,14 @@
          type (star_info), pointer :: s
          logical, intent(in) :: skip_partials, &
             need_atm_Psurf, need_atm_Tsurf
-         real(dp), intent(out) :: Teff, &
+         real(dp), intent(out) :: &
             lnT_surf, dlnT_dL, dlnT_dlnR, dlnT_dlnM, dlnT_dlnkap, &
             lnP_surf, dlnP_dL, dlnP_dlnR, dlnP_dlnM, dlnP_dlnkap
          integer, intent(out) :: ierr
 
          real(dp) :: L_surf
          real(dp) :: R_surf
+         real(dp) :: Teff
          real(dp) :: tau_surf
          real(dp) :: Teff4
          real(dp) :: T_surf4
@@ -792,10 +795,11 @@
          
          L_surf = s% L(1)
          R_surf = s% r(1)
+         Teff = s% Teff
          
          ! Initialize partials
-          dlnT_dL = 0._dp; dlnT_dlnR = 0._dp; dlnT_dlnM = 0._dp; dlnT_dlnkap = 0._dp
-          dlnP_dL = 0._dp; dlnP_dlnR = 0._dp; dlnP_dlnM = 0._dp; dlnP_dlnkap = 0._dp
+         dlnT_dL = 0._dp; dlnT_dlnR = 0._dp; dlnT_dlnM = 0._dp; dlnT_dlnkap = 0._dp
+         dlnP_dL = 0._dp; dlnP_dlnR = 0._dp; dlnP_dlnM = 0._dp; dlnP_dlnkap = 0._dp
 
          ! Evaluate the surface optical depth
 
@@ -844,6 +848,7 @@
                   write(*,1) 'tau_surf', tau_surf
                   write(*,1) 'L_surf', L_surf
                   write(*,1) 'R_surf', R_surf
+                  write(*,1) 'Teff', Teff
                   write(*,1) 's% m(1)', s% m(1)
                   write(*,1) 's% cgrav(1)', s% cgrav(1)
                   write(*,*) 'failed in get_atm_PT'

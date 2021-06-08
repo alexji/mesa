@@ -161,27 +161,59 @@ This test case checks that the evolution of a 7 Msun, metal-poor Z = 0.001, mode
 
 
 :ref:`accreted_material_j`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This test suite example checks the accretion of material and angular momentum onto a 20 Msun model.
 
 :ref:`adjust_net`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 This test suite example checks the functionality of the adaptive nuclear reaction network.
 
 
 :ref:`carbon_acc`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
 
 This test suite example checks the accretion of carbon onto a pure carbon white dwarf.
 
 :ref:`cburn_inward`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
 
 This test suite example checks the inward propagation of a carbon burning front in a 7.5 Msun model.
 
 
+:ref:`ccsn_IIp`
+^^^^^^^^^^^^^^^
+
+This test suite example builds a Type IIp supernova model, including Rayleigh-Taylor Instability mixing, for subsquent use in STELLA.
+
+
+:ref:`conserve_angular_momentum`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite example checks angular momentum conservation from the zero age main-sequence to the formation of a helium core in 1.0 Msun, Z=0.02 metallicity, model.
+
+
+:ref:`custom_colors`
+^^^^^^^^^^^^^^^^^^^^
+
+This test suite example shows how to use user-defined color filter and extinction files.
+
+:ref:`custom_rates`
+^^^^^^^^^^^^^^^^^^^
+
+This test suite case checks the use of custom nuclear reaction rates in an accreting 0.3 Msun helium white dwarf model.
+
+
+:ref:`diffusion_smoothness`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test suite case checks that element diffusion produces a sufficiently smooth Brunt profile.
+
+:ref:`extended_convective_penetration`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of the extended convective penetration prescription for core boundary mixing.
 
 
 :ref:`c13_pocket`
@@ -214,6 +246,13 @@ This test case produces a 0.6 |Msun| white dwarf with a carbon-oxygen
 dominated core and a stratified atmosphere dominated by hydrogen at
 its surface. The final model produced by this test case also serves as
 the starting model for :ref:`wd_diffusion` and :ref:`wd_cool_0.6M`.
+
+:ref:`magnetic_braking`
+^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case involves the calculation of the spin down caused by a
+large-scale magnetic field in a massive star model.
+
 
 :ref:`ppisn`
 ^^^^^^^^^^^^
