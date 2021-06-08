@@ -5,7 +5,6 @@ void AMR( struct domain * );
 
 void set_wcell( struct domain * );
 
-void adjust_RK_cons( struct domain * , double );
 void move_cells( struct domain * , double , double );
 void calc_dr( struct domain * );
 void calc_prim( struct domain * );
@@ -17,8 +16,6 @@ void boundary( struct domain * );
 void exchangeData( struct domain * );
 
 void onestep( struct domain * theDomain , double RK , double dt , int first_step , int last_step ){
-   
-   adjust_RK_cons( theDomain , RK );
 
    radial_flux( theDomain , dt );
    add_source( theDomain , dt );

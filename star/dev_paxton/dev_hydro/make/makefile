@@ -19,11 +19,11 @@ endif
 
 #################################################################
 
-INITIAL  = hse3
+INITIAL  = bill
 # full set: bill chevalier dust ejecta hse hse2 hse3 isentropic messy readtable shocktube uniform 
 
 COBJS = dispatch.o profiler.o report.o readpar.o domain.o gridsetup.o geometry.o misc.o \
-timestep.o onestep.o riemann.o boundary.o gravity.o plm.o $(INITIAL).o ascii.o euler.o
+timestep.o riemann.o boundary.o gravity.o plm.o $(INITIAL).o ascii.o euler.o
 
 # STAR_WORK_OBJS defined in makefile_header
 OBJS = $(COBJS) $(STAR_WORK_OBJS) run.o

@@ -1,13 +1,20 @@
    
       model_number ! counting from the start of the run
       day ! elapsed simulated time in days since the start of the run
-      log_dt_sec ! log10 time_step in seconds
       star_age_sec
+      star_age_min
+      star_age_hr
+      star_age_day
+      star_age_yr
 
+      log_dt_sec ! log10 time_step in seconds
+      
+      radius_cm
       radius
       log_R
-      v_surf_km_s ! (km/s)
-      v_div_csound_surf ! velocity divided by sound speed at outermost grid point
+      v_surf
+      u_surf
+
       luminosity ! luminosity in Lsun units
       log_L ! log10 luminosity in Lsun units
       Teff

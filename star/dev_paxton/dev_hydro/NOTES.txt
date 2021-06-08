@@ -1,3 +1,28 @@
+changes
+   replace MPI by OpenMP
+   
+   Lagrangian with face velocity eqn 3.7 CSS Cheng_Shu_Song 2020.  NOT HLLC contact wave velocity.
+   should be no mass flux.  check this.
+   change momentum and energy flux for Lagrangian.
+   change cell geometry source 2*P/r*cell_volume to P*(area_outer_face - area_inner_face)
+      https://www.ita.uni-heidelberg.de/~dullemond/lectures/num_fluid_2009/Chapter_10.pdf
+      10.1.3 A note of caution for computing the geometric source terms
+         Let us briefly return to the discrete radial momentum equation Eq.(10.13). 
+         The term 2P/r appeared because we had to convert the ∂P/∂r into a (1/r2)∂(Pr2)/∂r 
+         in order to incorporate it into the momentum flux difference. It matters, however, how one computes this term. 
+         If done without care, one could easily get a situation in which the case P (r, θ, φ) =constant and u, v, w = 0 
+         is not recognized by the solver as a static solution. One can, however, replace:
+            (2P V)/r → P∆rSr ≡ (S(r),i+1/2,j,k − S(r),i−1/2,j,k)Pi,j,k (10.18)
+         If one now computes this geometric pressure source term in this way, then for the case of P (r, θ, φ) =constant 
+         and u, v, w = 0 the solution is kept unaltered, as it should be, down to machine precision. In other words, the 
+         code now “recognizes” the P (r, θ, φ) =constant solution. The reason why this is the case is because the term 
+         2P/r arises because of the differences in the surface areas of the cell interfaces at i − 1/2 and i + 1/2 which 
+         are used in the ∆r(FrrSr) term. So by compensating this with exactly the same but opposite we get an exact 
+         cancellation, and thereby a constant pressure will be recognized as such.
+      
+   change mindt to 3.11 CSS
+
+
 paul.h
    NUM_Q = 5
    domain
@@ -54,10 +79,10 @@ generate_log   profiler.c
 timestep       timestep.c                     change to SSPRK(2,2) Gottlieb_2005, sect 2.1
    RK_cons = cons // start of stage info 
    onestep( theDomain , 0.0 ,     dt , 1 , 0 );
+   adjust_RK_cons  
    onestep( theDomain , 0.5 , 0.5*dt , 0 , 1 );
    update time t and bump count_steps
 onestep        onestep.c
-   adjust_RK_cons                               << move this call to timestep
    radial_flux
    add_source
    if( first_step ) move_cells
@@ -67,8 +92,6 @@ onestep        onestep.c
    boundary
 adjust_RK_cons    misc.c
 radial_flux       misc.c
-   calculate_mass
-   calculate_pot
    plm
    for( i=0 ; i<Nr-1 ; ++i ){    // for each face except surface
       riemann_flux( cL , cR , r , dA*dt );
@@ -81,18 +104,23 @@ calculate_pot     gravity.c
 get_g             gravity.c
    -G*m/r^2 at cell center
 plm               plm.c
+   calculate_mass
+   calculate_pot
    set c->grad using 3 cells minmod
-   add HSE terms to pressure for riemann well-balancing
+   remove HSE terms from pressure for reconstruction
 riemann_flux      riemann.c
+   add back HSE terms for pressure
 add_source        misc.c
    for( i=0 ; i<Nr ; ++i ){
+      get_dV
       source
       source_alpha
    }
-   gravity_addsrc
+   grav_src
+get_dV            geometry.c
 source            euler.c
 source_alpha      euler.c
-gravity_addsrc    gravity.c
+grav_src          gravity.c
 move_cells        misc.c
 calc_dr           misc.c
 calc_prim         misc.c

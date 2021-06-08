@@ -125,7 +125,7 @@ void source( double * prim , double * cons , double rp , double rm , double dVdt
    double Pp  = prim[PPP];
    double r  = .5*(rp+rm);
    double r2 = (rp*rp+rm*rm+rp*rm)/3.;
-   cons[SRR] += 2.*Pp*(r/r2)*dVdt;
+   cons[SRR] += 2.*Pp*(r/r2)*dVdt;  // geometry source for momentum
 }
 
 void source_alpha( double * prim , double * cons , double * grad_prim , double r , double dVdt ){
@@ -169,7 +169,7 @@ double get_eta( double * prim , double * grad_prim , double r ){
 
 }
 
-void vel( double * prim1 , double * prim2 , double * Sl , double * Sr , double * Ss ){
+void vel( double * prim1 , double * prim2 , double * Sl , double * Sr , double * Ss , double * w){
    
    double gam = GAMMA_LAW;
 
@@ -193,6 +193,10 @@ void vel( double * prim1 , double * prim2 , double * Sl , double * Sr , double *
    if( *Sr <  cs2 + vn2 ) *Sr =  cs2 + vn2;
    if( *Sl > -cs2 + vn2 ) *Sl = -cs2 + vn2;
    
+   // w is Roe’s average of velocities from its left and right sides
+   double sqrt_rho1 = sqrt(rho1);
+   double sqrt_rho2 = sqrt(rho2);
+   *w = (sqrt_rho1*vn1 + sqrt_rho2*vn2)/(sqrt_rho1 + sqrt_rho2);
 }
 
 double mindt( double * prim , double w , double r , double g , double dr ){

@@ -279,7 +279,7 @@
          end if
 
          if (s% u_flag) then
-            v_surf = s% u(1)
+            v_surf = s% u_face_ad(1)%val
          else if (s% v_flag) then
             v_surf = s% v(1)
          else

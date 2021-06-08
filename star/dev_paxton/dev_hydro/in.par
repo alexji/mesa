@@ -2,10 +2,10 @@
 
 //Time Range//
 T_Start		0.0
-T_End			20
+T_End			0.0275 ! 20
 
 //Output Frequency//
-Num_Reports		1e1
+Num_Reports		1e0 ! 1e1
 Num_Snapshots		0
 Num_Checkpoints		2
 Use_Logtime		0
@@ -13,7 +13,7 @@ Use_Logtime		0
 //Grid Dimensions//
 Num_R			256
 R_Min			0.0 
-R_Max			10.0 
+R_Max			1.0 
 Log_Zoning		2  //0=Uniform, 1=Log, 2=Hybrid
 Log_Radius		3.0	//Only for option 2 of Log_Zoning
 
@@ -40,7 +40,7 @@ Gravity_Balanced	1
 
 
 //RT Model Parameters
-Use_RT			0
+Use_RT			1
 Measure_Growth		0
 
 RT_A			1e-3     //1.176e-5

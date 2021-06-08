@@ -19,25 +19,18 @@ void start() {
    fclose(rFile);
 }
 
-void set_wcell( struct domain * );
-double getmindt( struct domain * );
-void check_dt( struct domain * , double * );
-void possiblyOutput( struct domain * , int );
-void timestep( struct domain * , double );
+void timestep( struct domain * );
 
 void steps(int max_numsteps) {
    int numsteps = 0;
    while( !(theDomain.final_step) ){
-      set_wcell( &theDomain );
-      double dt = getmindt( &theDomain );
-      check_dt( &theDomain , &dt );
-      possiblyOutput( &theDomain , 0 );
-      timestep( &theDomain , dt );
+      timestep( &theDomain );
       numsteps += 1;
       if (numsteps >= max_numsteps) return;
    }
 }
 
+void possiblyOutput( struct domain * , int );
 void generate_log( struct domain * );
 void freeDomain( struct domain * );
 
@@ -51,6 +44,7 @@ int copy_data(
    int selector, int lrdat, double rdat[]) 
 {
    int nz = theDomain.nz;
+   double gamma_law = theDomain.theParList.Adiabatic_Index;
    if (nz > lrdat) return(-1);
    struct cell * theCells = theDomain.theCells;
    int i;
@@ -69,9 +63,11 @@ int copy_data(
       else if (selector == 9) { x = c->prim[XXX]; } // cell mass fraction of species X
       else if (selector == 10) { x = c->prim[AAA]; } // cell RTI alpha
       else if (selector == 11) { x = c->cons[DDD]; } // cell mass
-      else if (selector == 11) { x = c->cons[SRR]; } // cell momentum
-      else if (selector == 11) { x = c->cons[TAU]; } // cell total energy (KE + IE + PE)
-      else if (selector == 11) { x = c->cons[XXX]; } // cell mass of species X
+      else if (selector == 12) { x = c->cons[SRR]; } // cell momentum
+      else if (selector == 13) { x = c->cons[TAU]; } // cell total energy (KE + IE + PE)
+      else if (selector == 14) { x = c->cons[XXX]; } // cell mass of species X
+      else if (selector == 15) { 
+         x = sqrt(fabs(gamma_law*c->prim[PPP]/c->prim[RHO])); } // cell sound speed
       else { return(-1); }
       int k = nz - 1 - i;
       rdat[k] = x;
@@ -91,8 +87,10 @@ int dispatch(
    } else if (op == 1) {
       steps(ipar[0]);
       rdat[0] = theDomain.t;
+      rdat[1] = theDomain.dt;
       idat[0] = theDomain.final_step;
       idat[1] = theDomain.count_steps;
+      idat[2] = theDomain.nz;
    } else if (op == 2) {
       finish();
    } else if (op == 3) {

@@ -21,13 +21,13 @@ void setRiemannParams( struct domain * theDomain ){
 void prim2cons( double * , double * , double , double );
 void flux( double * , double * );
 void getUstar( double * , double * , double , double );
-void vel( double * , double * , double * , double * , double * , double );
+void vel( double * , double * , double * , double * , double * , double * );
 double get_eta( double * , double * , double );
 
 double get_g( struct cell * );
 double get_GMr( struct cell * );
 
-void riemann_flux( struct cell * cL , struct cell * cR, double r ){
+void riemann_flux( int i, struct cell * cL , struct cell * cR, double r ){
 
    double primL[NUM_Q];
    double primR[NUM_Q];
@@ -36,7 +36,7 @@ void riemann_flux( struct cell * cL , struct cell * cR, double r ){
    double drR = .5*cR->dr;
 
    int q;
-   for( q=0 ; q<NUM_Q ; ++q ){
+   for( q=0 ; q<NUM_Q ; ++q ){      
       primL[q] = cL->prim[q] + cL->grad[q]*drL;
       primR[q] = cR->prim[q] - cR->grad[q]*drR;
    }
@@ -50,9 +50,11 @@ void riemann_flux( struct cell * cL , struct cell * cR, double r ){
       primR[PPP] -= gHSE_R*drR;
    }
 
-   double Sl,Sr,Ss;
+   double Sl,Sr,Ss,w;
 
-   vel( primL , primR , &Sl , &Sr , &Ss , r );
+   vel( primL , primR , &Sl , &Sr , &Ss , &w );
+   //cL->wiph = w;
+   w = cL->wiph;
 
 
    double Fl[NUM_Q];
@@ -62,7 +64,6 @@ void riemann_flux( struct cell * cL , struct cell * cR, double r ){
 
    double Flux[NUM_Q];
 
-   double w = cL->wiph;
 
    if( w < Sl ){
       flux( primL , Fl );

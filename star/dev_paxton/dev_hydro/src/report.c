@@ -56,7 +56,6 @@ void report( struct domain * theDomain ){
       double alpha = theCells[i].prim[AAA];
       double X   = theCells[i].prim[XXX];
       double w = X*(1.-X);
-      
       double grho = theCells[i].grad[RHO];
       double gP   = theCells[i].grad[PPP];
 

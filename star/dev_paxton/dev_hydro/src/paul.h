@@ -47,17 +47,20 @@ struct domain{
 
    struct param_list theParList;
 
-   double t;
-   int count_steps;
+   double t, dt;
    double t_init, t_fin;
-   int nrpt;
-   int N_rpt;
-   int nsnp;
-   int N_snp;
-   int nchk;
-   int N_chk;
 
+   int count_steps;
    int final_step;
+
+   int nrpt, N_rpt;
+   int nsnp, N_snp;
+   int nchk, N_chk;
+   
+   double totE, totE_init; // KE+IE+PE should be constant
+   double totKE, totKE_init;
+   double totIE, totIE_init;
+   double totPE, totPE_init;
 
 };
 

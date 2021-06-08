@@ -202,14 +202,19 @@
       subroutine do_hydro(s, ierr)
          type (star_info), pointer :: s
          integer, intent(out) :: ierr
-         integer, parameter :: &
-            lipar = 10, lrpar = 10, lidat = 10, lrdat = 10
-         real(dp) :: rpar(lrpar), rdat(lrdat)
-         integer :: ipar(lipar), idat(lidat)
-         integer iop, nsteps_per_call, nsteps_taken, max_calls, i
+         real(dp), allocatable :: rpar(:), rdat(:)
+         integer, allocatable :: ipar(:), idat(:)
+         integer iop, nsteps_per_call, nsteps_taken, max_calls, i, &
+            lipar, lrpar, lidat, lrdat, nz
          real(dp) :: time
          logical :: final_step, must_write_files
          include 'formats'
+         nz = s% nz
+         lipar = nz
+         lrpar = nz
+         lidat = nz
+         lrdat = nz
+         allocate(rpar(lrpar), rdat(lrdat), ipar(lipar), idat(lidat))
          ! start hydro
          ierr = f_dispatch_c(0, &
             lrpar, rpar(1), lipar, ipar(1), lrdat, rdat(1), lidat, idat(1))
@@ -218,7 +223,7 @@
          nsteps_taken = 0
          time = 0d0
          max_calls = 10000
-         nsteps_per_call = 100
+         nsteps_per_call = 500
          do i = 1, max_calls
             ipar(1) = nsteps_per_call
             ierr = f_dispatch_c(1, &
@@ -226,10 +231,17 @@
             if (ierr /= 0) stop 'do_hydro steps error'
             final_step = (idat(1) /= 0)
             nsteps_taken = idat(2)
+            s% model_number = nsteps_taken
+            nz = idat(3); s% nz = nz
             time = rdat(1)
+            s% time = time
+            s% star_age = time/secyer
+            s% dt = rdat(2)
             call update_star_data
-            !write(*,2) 'nsteps time', nsteps_taken, time
+            if (ierr /= 0) stop 'do_hydro update_star_data error'
             if (s% job% pgstar_flag) then
+               s% RTI_flag = .true. ! for profile_getval
+               s% u_flag = .true. ! for profile_getval
                call read_pgstar_controls(s, ierr) 
                if (ierr /= 0) stop 'do_hydro read_pgstar_controls error'
                must_write_files = final_step .and. s% job% save_pgstar_files_when_terminate
@@ -242,16 +254,47 @@
          ierr = f_dispatch_c(2, &
             lrpar, rpar(1), lipar, ipar(1), lrdat, rdat(1), lidat, idat(1))
          if (ierr /= 0) stop 'do_hydro finish error'
-
+         
+         !stop 'do_hydro'
          ierr = -1 ! to terminate the star run
          
          contains
          
          subroutine update_star_data
-            s% time = time
-            s% star_age = time/secyer
-            s% model_number = nsteps_taken
+            integer k
+            call get1_vector(0, s% r, ierr); if (ierr /= 0) return
+            call get1_vector(1, s% m, ierr); if (ierr /= 0) return
+            call get1_vector(2, s% v, ierr); if (ierr /= 0) return
+            do k=1,nz
+               s% u_face_ad(k)%val = s% v(k)
+            end do
+            !call get1_vector(3, s% grav_potential, ierr); if (ierr /= 0) return
+            call get1_vector(4, s% dm, ierr); if (ierr /= 0) return
+            !call get1_vector(5, s% dr, ierr); if (ierr /= 0) return
+            call get1_vector(6, s% rho, ierr); if (ierr /= 0) return
+            call get1_vector(7, s% Peos, ierr); if (ierr /= 0) return
+            call get1_vector(8, s% u, ierr); if (ierr /= 0) return
+            call get1_vector(9, s% X, ierr); if (ierr /= 0) return
+            call get1_vector(10, s% alpha_RTI, ierr); if (ierr /= 0) return
+            !call get1_vector(11, s% cell_mass, ierr); if (ierr /= 0) return
+            !call get1_vector(12, s% cell_momentum, ierr); if (ierr /= 0) return
+            !call get1_vector(13, s% cell_total_energy, ierr); if (ierr /= 0) return
+            !call get1_vector(14, s% cell_mass_X, ierr); if (ierr /= 0) return
+            call get1_vector(15, s% csound, ierr); if (ierr /= 0) return
+            do k=1,nz
+               s% v_div_csound(k) = s% u(k)/s% csound(k)
+            end do
          end subroutine update_star_data
+         
+         subroutine get1_vector(selector, d, ierr)
+            integer, intent(in) :: selector
+            real(dp) :: d(:)
+            integer, intent(out) :: ierr
+            ierr = 0
+            ipar(1) = selector
+            ierr = f_dispatch_c(3, &
+               lrpar, rpar(1), lipar, ipar(1), s% nz, d(1), lidat, idat(1))
+         end subroutine get1_vector
          
       end subroutine do_hydro
 

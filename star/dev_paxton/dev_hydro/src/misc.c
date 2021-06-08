@@ -115,8 +115,9 @@ void calc_dr( struct domain * theDomain ){
 
 }
 
-void calculate_mass( struct domain * );
 void calculate_pot( struct domain * );
+void calculate_mass( struct domain * );
+
 
 void calc_prim( struct domain * theDomain ){
 
@@ -146,28 +147,34 @@ void calc_prim( struct domain * theDomain ){
 
 }
 
-void plm( struct domain *);
-void riemann_flux( struct cell * , struct cell * , double );
+void plm( struct domain * , int );
+void riemann_flux( int, struct cell * , struct cell * , double );
 
-void radial_flux( struct domain * theDomain , double dt ){
+void prepare_riemann_flux( struct domain * theDomain ){
+   
+   plm( theDomain , 0 );
+   plm( theDomain , 1 );
 
-   int gE = theDomain->theParList.grav_e_mode;
-   if( gE ) calculate_mass(theDomain);
-   if( gE == 2 ){
-      calculate_pot( theDomain );
-   }
    struct cell * theCells = theDomain->theCells;
    int nz = theDomain->nz;
    int i;
-   plm( theDomain );
    
    #pragma omp for private(i)
    for( i=0 ; i<nz-1 ; ++i ){
       struct cell * cL = theCells+i;
       struct cell * cR = theCells+i+1;
       double r = cL->riph;
-      riemann_flux( cL , cR , r );
+      riemann_flux( i, cL , cR , r );
    }
+}
+
+void radial_flux( struct domain * theDomain , double dt ){
+   
+   prepare_riemann_flux(theDomain);
+
+   struct cell * theCells = theDomain->theCells;
+   int nz = theDomain->nz;
+   int i;
    
    for( i=0 ; i<nz-1 ; ++i ){
       struct cell * cL = theCells+i;
@@ -187,16 +194,16 @@ void radial_flux( struct domain * theDomain , double dt ){
 
 void source( double * , double * , double , double , double );
 void source_alpha( double * , double * , double * , double , double );
-void calculate_mass( struct domain * );
 void grav_src( struct cell * , double );
 
 void add_source( struct domain * theDomain , double dt ){
 
    struct cell * theCells = theDomain->theCells;
    int nz = theDomain->nz;
-   int i;
    int gravity_flag = theDomain->theParList.grav_flag;
    if( gravity_flag ) calculate_mass( theDomain );
+   
+   int i;
    #pragma omp for private(i)
    for( i=0 ; i<nz ; ++i ){
       struct cell * c = theCells+i;
@@ -284,7 +291,7 @@ void AMR( struct domain * theDomain ){
    int gE = theDomain->theParList.grav_e_mode;
 
    if( S > MaxShort ){
-      printf("Short = %e #%d of %d\n",S,iS,nz);
+      //printf("Short = %e #%d of %d\n",S,iS,nz);
 
       int iSp = iS+1;
       int iSm = iS-1;
@@ -335,7 +342,7 @@ void AMR( struct domain * theDomain ){
 
    if( L > MaxLong ){
 
-      printf("Long  = %e #%d of %d\n",L,iL,nz);
+      //printf("Long  = %e #%d of %d\n",L,iL,nz);
       theDomain->nz += 1;
       nz = theDomain->nz;
       theDomain->theCells = (struct cell *) realloc( theCells , nz*sizeof(struct cell) );

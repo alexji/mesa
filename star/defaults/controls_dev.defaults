@@ -8,6 +8,12 @@
 !  IN PARTICULAR, THESE ARE NOT YET FOR USE IN RESEARCH TO BE PUBLISHED.
 
 
+
+      op_split_kinematics = .false.
+
+
+
+
       ! TDC options
       ! ~~~~~~~~~~~
       ! Things related to TDC

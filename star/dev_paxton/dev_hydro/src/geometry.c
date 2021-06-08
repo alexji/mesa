@@ -15,5 +15,5 @@ double get_moment_arm( double rp , double rm ){
 double get_dV( double rp , double rm ){
    double dr  = rp-rm;
    double r2    = (rp*rp+rm*rm+rp*rm)/3.;
-   return( 4.*M_PI*r2*dr );
+   return( 4.*M_PI*r2*dr );  // = 4Pi/3*(rp^3 - rm^3)
 }
