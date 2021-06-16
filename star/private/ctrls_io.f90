@@ -387,7 +387,7 @@
     hydro_mtx_max_allowed_logRho, report_min_rcond_from_DGESXV, &
     hydro_mtx_min_allowed_logT, hydro_mtx_min_allowed_logRho, use_DGESVX_in_bcyclic, use_equilibration_in_DGESVX, &
     op_split_burn, op_split_burn_min_T, op_split_burn_eps, op_split_burn_odescal, &
-    op_split_burn_min_T_for_variable_T_solver, op_split_kinematics, solver_test_partials_show_dx_var_name, &
+    op_split_burn_min_T_for_variable_T_solver, solver_use_2nd_order_IMEX, solver_test_partials_show_dx_var_name, &
     tiny_corr_coeff_limit, scale_correction_norm, corr_param_factor, num_times_solver_reuse_mtx, &
     scale_max_correction, ignore_min_corr_coeff_for_scale_max_correction, ignore_too_large_correction, ignore_species_in_max_correction, &
     corr_norm_jump_limit, max_corr_jump_limit, resid_norm_jump_limit, max_resid_jump_limit, RSP2_use_mass_interp_face_values, &
@@ -1989,7 +1989,7 @@ s% gradT_excess_max_log_tau_full_off = gradT_excess_max_log_tau_full_off
  s% op_split_burn_odescal = op_split_burn_odescal
  s% op_split_burn_min_T_for_variable_T_solver = op_split_burn_min_T_for_variable_T_solver
  
- s% op_split_kinematics = op_split_kinematics
+ s% solver_use_2nd_order_IMEX = solver_use_2nd_order_IMEX
 
  s% tiny_corr_coeff_limit = tiny_corr_coeff_limit
  s% scale_correction_norm = scale_correction_norm
@@ -3667,7 +3667,7 @@ s% gradT_excess_max_log_tau_full_off = gradT_excess_max_log_tau_full_off
  op_split_burn_odescal = s% op_split_burn_odescal
  op_split_burn_min_T_for_variable_T_solver = s% op_split_burn_min_T_for_variable_T_solver
  
- op_split_kinematics = s% op_split_kinematics
+ solver_use_2nd_order_IMEX = s% solver_use_2nd_order_IMEX
 
  tiny_corr_coeff_limit = s% tiny_corr_coeff_limit
  scale_correction_norm = s% scale_correction_norm

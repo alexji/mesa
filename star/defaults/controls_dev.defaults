@@ -9,7 +9,7 @@
 
 
 
-      op_split_kinematics = .false.
+      solver_use_2nd_order_IMEX = .false.
 
 
 

@@ -1,6 +1,6 @@
 
 
-         logical :: op_split_kinematics
+         logical :: solver_use_2nd_order_IMEX
 
 
 
