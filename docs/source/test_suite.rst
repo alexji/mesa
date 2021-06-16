@@ -216,6 +216,70 @@ This test suite case checks that element diffusion produces a sufficiently smoot
 This test case checks the implementation of the extended convective penetration prescription for core boundary mixing.
 
 
+:ref:`gyre_in_mesa_bcep`
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for a 12 Msun, Z=0.02 metallicity, model evolving from the zero-age main sequence to core hydrogen depletion;
+a beta Cephei stellar model.
+
+
+:ref:`gyre_in_mesa_envelope`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for the envelope of a 12 Msun, Z=0.02 metallicity, model.
+
+:ref:`gyre_in_mesa_ms`
+^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for a 1 Msun, Z=0.02 metallicity, model evolving from the zero-age main sequence to core hydrogen depletion.
+
+:ref:`gyre_in_mesa_rsg`
+^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for a 21 Msun, Z=0.02 metallicity, model in the red supergiant regime.
+
+:ref:`gyre_in_mesa_spb`
+^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for a 5 Msun, Z=0.02 metallicity, model evolving from the zero-age main sequence to core hydrogen depletion; 
+a slowly pulsating B-type star (SPB) stellar model.
+
+:ref:`gyre_in_mesa_wd`
+^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the implementation of GYRE in MESA for a cooling 0.85 Msun white dwarf model.
+
+:ref:`high_mass`
+^^^^^^^^^^^^^^^^
+
+This test case checks the evolution of a 300 Msun, Z = 1e-4 metallicity, model through core hydrogen depletion.
+
+:ref:`high_z`
+^^^^^^^^^^^^^
+
+This test case checks the capability of evolving high metallicity models through core helium depletion with a 7 Msun, Z=0.07 metallicity model.
+
+:ref:`hot_cool_wind`
+^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the cool wind, hot wind capability by evolving a 7 Msun, Z=0.02 metallicity model from the zero-age main sequence to core helium depletion.
+
+:ref:`hse_riemann`
+^^^^^^^^^^^^^^^^^^
+
+This test case checks Riemann HLLC solver can hold an envelope model in hydrostatic equilibrium.
+
+:ref:`irradiated_planet`
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+This test case checks the evolution of an ~1 Mjup model after the surface has been irradiated.
+
+:ref:`low_z`
+^^^^^^^^^^^^
+
+This test case checks the evolutions of a 0.8 Msun, Z=1e-4 metallicity model from the pre-main sequence to core hydrogen depletion.
+
+
 :ref:`c13_pocket`
 ^^^^^^^^^^^^^^^^^
 
