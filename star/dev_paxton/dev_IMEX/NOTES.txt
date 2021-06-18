@@ -1,0 +1,245 @@
+
+spherical symmetry
+gamma law eos
+fixed opacity
+no gravity
+Eulerian
+radiative diffusion, but no convection
+
+basic variables for cells are densities (per cm^3)  
+prim = (rho, rho_v, energy)
+   mom := rho_v*vel
+   energy := Egas + Erad + Ekin
+   calculate T from rho, rho_v, energy
+   calculate Egas and Erad from T
+      Prad = Erad/3
+      Pgas = (gamma-1)*Egas
+      Ptot = Pgas + Prad
+
+derived from r at face
+   dr, dr_bar, Area, Vol, dVol
+
+conserved variables for cells
+cons = prim*dVol = (MASS, MOM, ETOT)
+
+Eulerian PDEs for prim
+d(rho)/dt + 1/r^2*d(r^2*rho*vel)/dr = 0
+d(rho_v)/dt + 1/r^2*d(r^2*vel*rho_v)/dr + dPtot/dr = 0   
+d(energy)/dt + 1/r^2*d(r^2*vel*(energy + Ptot))/dr = 1/r^2*d(r^2*D*d(T^4)/dr)/dr
+      D = diffusion coefficient
+      
+Eulerian conservation form PDEs for cons
+   d(MASS)/dt = mass_flux_in - mass_flux_out
+      mass_flux = area*rho*vel
+   d(MOM)/dt = mom_flux_in - mom_flux_out + geometry_source
+      mom_flux = area*(rho_v*vel + Ptot)
+      geometry_source = (area_out - area_in)*Ptot
+   d(ETOT)/dt = energy_flux_in - energy_flux_out + diffusion_source
+      energy_flux = area*(energy + Ptot)*vel
+      diffusion_source = Lrad_in - Lrad_out
+      Lrad = -area*D*d(T^4)/dr
+
+write eqns as d(cons)/dt = F(cons) + G(cons) with F for explicit terms and G for implicit ones
+   F_MASS = mass_flux_in - mass_flux_out
+   F_MOM = mom_flux_in - mom_flux_out + geometry_source
+   F_ETOT = energy_flux_in - energy_flux_out
+   G_MASS = 0
+   G_MOM = 0
+   G_ETOT = Lrad_in - Lrad_out
+
+
+basic idea of how to solve step dt from (prim_0, T_0) to (prim_1, T_1)
+
+   1. calc minmod slope-limited gradients of prim at cell center by r
+   2. use gradients to set face values (Local Lax Friedrichs or HLLC)
+   3. use face values to set F at face
+   4. set cons_x by explicit stage
+      either 1st order
+         cons_x = cons_0 + dt*F(cons_0)
+      or 2nd order (Runge-Kutta, TVD/SSP, Gottlieb)
+         cons_x1 = cons_0 + dt*F(cons_0)
+         cons_x = cons_0 + dt*(F(cons_0) + F(cons_x1))/2
+   5. solve for T_x using cons_x
+      use eqn 2.12 for T from quartic equation
+         Egas := rho*Cv*T
+         Erad := crad*T^4
+         Ekin := 0.5*rho*vel^2
+         solve for T: Etot = rho*Cv*T + crad*T^4 + 0.5*rho*vel^2
+      then calc Egas and Erad using trial T_x
+      if Erad << Egas, then ignore Erad to get better results
+         i.e., switch to T_x = (Etot - Ekin)/(Cv*rho)
+   6. update ETOT by implicit solve for T_1
+      linear in T^4, so single tri-diagonal matrix solve gives delta(T^4)
+      starting guess for T_1 is T_x
+      either 1st order full implicit
+         ETOT_1(T_1) = ETOT_x + dt*G_ETOT(T_1)
+      or 2nd order time-centered
+         ETOT_1(T_1) = ETOT_x + dt*(G(T_0) + G(T_1))/2
+   7. cons_1 = (MASS_x, MOM_x, ETOT_1)
+      prim_1 = cons_1/dVol
+   
+note that even if use 2nd order for explicit + implicit stages,
+   only expect 1st order overall because of the split
+   but can still get reduced numerical damping compared to 1st order stages.
+
+
+
+Second order IMEX stiffly stable scheme (2016_Wang_Shu_Zang; 1997_ascher_ruuth_spiteri)
+
+F explicit terms, G implicit terms
+2 stages
+gam = 1 - sqrt(2)/2 ~ 0.3
+delta = 1 - 1/(2*gam) ~ -0.7
+
+stage 1
+   F0 = F(cons_0) at start of stage 1
+   explicit cons_s1x = cons_0 + dt*gam*F0, 
+   implicit cons_s1 = cons_s1x + dt*gam*G(cons_s1), 
+   G1 = G(cons_s1) at end of stage 1
+stage 2
+   F1 = F(cons_s1) at start of stage 2
+   explicit cons_s2x = cons_0 + dt*((1-gam)*G1 + delta*F0 + (1-delta)*F1) 
+   implicit cons_s2 = cons_s2x + dt*gam*G(cons_s2)
+   G2 = G(cons_s2) at end of stage 2
+stage 2 results are the final values
+   cons_1 = cons_s2 = cons_0 + dt*(gam*G2 + (1-gam)*G1 + delta*F0 + (1-delta)*F1))
+   so should be able to adapt ETOT_1 equation to include PE with d_PE/dt = (PE_1 - PE_0)/dt
+
+
+
+expanded form
+
+given prim_0, T_0, cons_0 = prim_0*dVol
+stage 1 (prim_0, T_0, cons_0)
+   F0 = F(prim_0, T_0)
+   explicit cons_s1x = cons_0 + dt*gam*F0
+   implicit cons_s1 = cons_s1x + dt*gam*G(cons_s1)
+   G1 = G(cons_s1) at end of stage 1
+      intial guess T_s1(k) = T(cons_s1x(k))
+      ETOT_1(T_s1) = ETOT_s1x + dt*gam*dETOT_dt(T_s1)
+      implicit solve for T_s1
+   prim_s1 = cons_s1/dVol
+stage 2 (prim_s1, T_s1, cons_s1)
+   F1 = F(prim_s1, T_s1)
+   explicit cons_s2x = cons_0 + dt*((1-gam)*G1 + delta*F0 + (1-delta)*F1) 
+   implicit cons_s2 = cons_s2x + dt*gam*G(cons_s2)
+   G2 = G(cons_s2) at end of stage 2
+      intial guess T_s2(k) = T(cons_s2x(k))
+      ETOT_2(T_s2) = ETOT_s2x + dt*gam*dETOT_dt(T_s2)
+
+the stage 2 results are the final values
+   cons_1 = cons_s2 = cons_0 + dt*(gam*G2 + (1-gam)*G1 + delta*F0 + (1-delta)*F1))
+   so should be able to adapt ETOT_1 equation to include PE with d_PE/dt = (PE_1 - PE_0)/dt
+
+
+calc F(prim, T)
+   do k=1,nz
+      grad(k) = d(prim(k))/dr using minmod
+   end do
+   do k=1,nz
+      prim_left = prim(k) + grad(k)*dr(k)/2 ! on left side of face k
+      prim_right = prim(k-1) - grad(k-1)*dr(k-1)/2 ! on right side of face k
+      T_left = get_T(prim_left)
+      T_right = get_T(prim_right)
+      cs_left = cs(prim_left, T_left)
+      cs_right = cs(prim_right, T_right)
+      Ptot_left = Ptot(prim_left, T_left)
+      Ptot_right = Ptot(prim_right, T_right)
+      Flux_face(k) = get_Flux_face(prim_left, cs_left, Ptot_left, prim_right, cs_right, Ptot_right)
+   end do
+   do k=1,nz   
+      F(k) = area(k+1)*Flux_face(k+1) - area(k)*Flux_face(k)
+      for F momentum, add geometry source term = (area(k) - area(k+1))*Ptot(prim(k),T(k))
+   end do
+
+function get_T(rho, rho_v, energy)
+   v = rho_v/rho
+   Egas := rho*Cv*T
+   Erad := crad*T^4
+   Ekin := 0.5*rho_v*v
+   use eqn 2.12 for T from quartic equation
+      solve for T: energy = Egas + Erad + Ekin
+   then calc Egas and Erad using T
+   if Erad << Egas, then ignore Erad to get numerically more reliable results
+      i.e., switch to T = (energy - Ekin)/(Cv*rho)
+
+function Prad(T)
+   Prad = crad*T^4/3
+
+function Pgas(rho, T)
+   Pgas = (gamma-1)*rho*Cv*T
+
+function Ptot(prim, T)
+   Egas := rho*Cv*T
+   Erad := crad*T^4
+   Pgas = (gamma-1)*Egas
+   Prad = Erad/3
+   Ptot = Pgas + Prad
+   
+function cs(prim, T)  using eqn 2.7
+   Pgas = Pgas(rho, T)
+   Prad = Prad(T)
+   Ptot = Pgas + Prad
+   cs = sqrt(Gamma1(Prad/Pgas)*Ptot/rho)
+
+function get_Flux_face(primL, csL, PL, primR, csR, PR)   HLLC (from Toro book)
+
+   primK = { rhoK, rhoK*vK, energyK }   K = L or R
+   
+   ! Sl and Sr using 1988_einfeldt method
+   sq_rhoL = sqrt(rhoL)
+   sq_rhoR = sqrt(rhoR)
+   v_bar = (sq_rhoL*vL + sq_rhoR*vR))/(sq_rhoL + sq_rhoR)      10.50
+   eta_2 = 0.5*sq_rhoL*sq_rhoR/pow2(sq_rhoL + sq_rhoR)         10.54
+   d_bar = sqrt((sq_rhoL*pow2(csL) + sq_rhoR*pow2(csR))/(sq_rhoL + sq_rhoR) + eta_2*pow2(vR - vL))       10.53
+   Sl = v_bar - d_bar        10.52
+   Sr = v_bar + d_bar        10.52
+   
+   def flux(primK) = { rhoK*vK, rho_vK*vK + PK, (energyK + PK)*vK }        10.5 
+   def prim_star_K = rhoK*(Sk - vK)/(Sk - Ss)*{ 1, Ss, energyK/rhoK + (Ss - vK)*(Ss + PK/(rhoK*(Sk - vK))) }   10.39
+   def Fstar_K = flux(primK) + Sk*(prim_star_K - primK)         10.38
+   
+   if (Sl >= 0d0) then
+      Flux_face = flux(primL)
+   else if (Sr =< 0d0) then
+      Flux_face = flux(primR)
+   else 
+      Ss = ( PR - PL + rhoL*vL*(Sl - vL) - rhoR*vR*(Sr - vR) ) / ( rhoL*(Sl - vL) - rhoR*(Sr - vR) )      10.37
+      if (Ss > 0d0) then
+         Flux_face = Fstar_L
+      else 
+         Flux_face = Fstar_R
+      end if
+   end if
+
+
+
+
+
+
+
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,29 @@
+   
+      model_number ! counting from the start of the run
+      day ! elapsed simulated time in days since the start of the run
+      star_age_sec
+      star_age_min
+      star_age_hr
+      star_age_day
+      star_age_yr
+
+      log_dt_sec ! log10 time_step in seconds
+      
+      radius_cm
+      radius
+      log_R
+      v_surf
+      u_surf
+
+      luminosity ! luminosity in Lsun units
+      log_L ! log10 luminosity in Lsun units
+      Teff
+      effective_T
+      log_Teff ! log10 effective temperature
+   
+      log_rel_run_E_err
+      log_tot_KE
+
+      num_retries ! total during the run
+
+
