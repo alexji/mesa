@@ -1,0 +1,11 @@
+&imex_controls
+   ! uniform everything, so should just sit there with v = 0
+
+   problem_number = 0
+   nz = 200
+   time_end = 1d3
+   initial_dt = 1d-10         
+   
+   stage1_only = .true. ! debugging         
+   
+/

@@ -1,0 +1,52 @@
+
+   problem_number = -1
+      ! 0 initialize_static_problem
+      ! 1 initialize_Barenblatt_problem
+      ! 2 initialize_smooth_problem
+      
+   nz = 200
+   
+   initial_model_number = 0
+   initial_time = 0d0
+   initial_dt = 1d-10
+
+   time_end = 1d3
+
+! boundaries
+   R_inner = 0d0
+   M_inner = 0d0
+   L_inner = 0d0
+   Lsurf_factor = 0d0 ! no energy loss from surface 
+      ! 0.25d0 or so for "standard" surface luminosity
+
+! eos 
+   gamma = 5d0/3d0
+   Cv = 1d0
+   ! Rgas = Cv*(gamma - 1d0)
+   crad = 1d-5
+
+! opacity
+   ! L_rad = - area * TC * dT/dr
+   ! TC = thermal conduction coefficient = clight * crad / opacity
+   ! TC = TC0 * rho^TCa * T^TCb
+   TC0 = 1d0
+   TCa = 0d0
+   TCb = 2.5d0
+
+! timesteps
+   CFL = 0.5d0
+   CFL_front = 0.5d0
+   max_timestep_factor = 1.2d0
+   limit_dE_div_E = 0.1d0
+
+! solver
+   include_P_in_momentum_flux = .true.
+   thermal_diffusion_only = .false.
+   tol_resid_norm = 1d-8
+   tol_resid_max = 1d-6
+   newton_iter_max = 5 ! 50
+   stage1_only = .false.
+   
+! run_star_extras do_imex params
+   nsteps_per_call = 1000
+   max_calls = 10000

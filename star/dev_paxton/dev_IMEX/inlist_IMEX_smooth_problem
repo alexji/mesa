@@ -1,0 +1,18 @@
+&imex_controls
+   ! 2001 bates et al "Smooth problem test"
+   ! no shocks by time_end
+
+   problem_number = 2
+
+   nz = 100
+   time_end = 0.01d0
+   initial_dt = 1d-10  
+                   
+   ! TESTING
+   !TC0 = 0d0
+   !stage1_only = .true.
+   !include_P_in_momentum_flux = .false.         
+   
+   stage1_only = .true. ! debugging         
+   
+/

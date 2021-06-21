@@ -44,6 +44,8 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
+         include 'read_imex_controls.inc'
+         if (ierr /= 0) return
          s% extras_startup => extras_startup
          s% extras_start_step => extras_start_step
          s% extras_check_model => extras_check_model
@@ -56,6 +58,9 @@
          s% other_photo_read => extras_photo_read
          s% other_photo_write => extras_photo_write
       end subroutine extras_controls
+
+
+      include 'imex.inc'
 
 
       subroutine extras_photo_read(id, iounit, ierr)
@@ -185,35 +190,45 @@
       
       
       subroutine do_imex(s, ierr)
-         use imex, only: start_imex, steps_imex, finish_imex, initialize_problem_A
+         use imex, only: &
+            start_imex, steps_imex, get_imex_data, finish_imex, &
+            max_calls, nsteps_per_call
          type (star_info), pointer :: s
          integer, intent(out) :: ierr
-         integer :: nsteps_per_call, nsteps_taken, max_calls, i, nz
-         real(dp) :: time, dt
+         integer :: nsteps_taken, i, nz
+         real(dp) :: time, dt, total_energy_initial, total_energy
          logical :: final_step, must_write_files
          include 'formats'
-         nz = s% nz
-         call start_imex(initialize_problem_A, ierr)
+         if (max_calls <= 0) then
+            ierr = -1
+            write(*,*) 'imex max_calls <= 0', max_calls
+            return
+         end if
+         ierr = 0
+         call start_imex(total_energy_initial, ierr)
          if (ierr /= 0) stop 'start_imex error'
-         nsteps_taken = 0
-         time = 0d0
-         max_calls = 10000
-         nsteps_per_call = 500
          do i = 1, max_calls
             call steps_imex( &
-               nsteps_per_call, time, dt, &
+               nsteps_per_call, time, dt, total_energy, &
                final_step, nsteps_taken, nz, ierr)
             if (ierr /= 0) stop 'steps_imex error'
+            s% nz = nz
             s% model_number = nsteps_taken
             s% time = time
             s% star_age = time/secyer
-            call update_star_data
-            if (ierr /= 0) stop 'do_imex update_star_data error'
+            s% dt = dt
+            call get_imex_data( &
+               s% r, s% rho, s% energy, s% Peos, s% v, s% T, s% L, s% csound, s% v_div_csound)
+            if (ierr /= 0) stop 'get_imex_data error'
             if (s% job% pgstar_flag) then
                s% RTI_flag = .true. ! for profile_getval
-               s% u_flag = .true. ! for profile_getval
+               s% v_flag = .true.; s% u_flag = .false. ! for profile_getval
                call read_pgstar_controls(s, ierr) 
                if (ierr /= 0) stop 'do_imex read_pgstar_controls error'
+               write(*,2) 'do_imex time, dt, total_energy, log_rel_run_E_err', &
+                  s% model_number, time, dt, total_energy, &
+                  safe_log10(abs((total_energy - total_energy_initial)/total_energy))
+               if (final_step) write(*,*) 'done'
                must_write_files = final_step .and. s% job% save_pgstar_files_when_terminate
                call update_pgstar_plots(s, must_write_files, ierr)
                if (ierr /= 0) stop 'do_imex update_pgstar_plots error'
@@ -223,46 +238,7 @@
          call finish_imex(ierr)
          if (ierr /= 0) stop 'finish_imex error'
          !stop 'do_imex'
-         ierr = -1 ! to terminate the star run
-         
-         contains
-         
-         subroutine update_star_data
-            integer k
-            call get1_vector(0, s% r, ierr); if (ierr /= 0) return
-            call get1_vector(1, s% m, ierr); if (ierr /= 0) return
-            call get1_vector(2, s% v, ierr); if (ierr /= 0) return
-            do k=1,nz
-               s% u_face_ad(k)%val = s% v(k)
-            end do
-            !call get1_vector(3, s% grav_potential, ierr); if (ierr /= 0) return
-            call get1_vector(4, s% dm, ierr); if (ierr /= 0) return
-            !call get1_vector(5, s% dr, ierr); if (ierr /= 0) return
-            call get1_vector(6, s% rho, ierr); if (ierr /= 0) return
-            call get1_vector(7, s% Peos, ierr); if (ierr /= 0) return
-            call get1_vector(8, s% u, ierr); if (ierr /= 0) return
-            !call get1_vector(9, s% X, ierr); if (ierr /= 0) return
-            !call get1_vector(10, s% alpha_RTI, ierr); if (ierr /= 0) return
-            !call get1_vector(11, s% cell_mass, ierr); if (ierr /= 0) return
-            !call get1_vector(12, s% cell_momentum, ierr); if (ierr /= 0) return
-            !call get1_vector(13, s% cell_total_energy, ierr); if (ierr /= 0) return
-            !call get1_vector(14, s% cell_mass_X, ierr); if (ierr /= 0) return
-            call get1_vector(15, s% csound, ierr); if (ierr /= 0) return
-            do k=1,nz
-               s% v_div_csound(k) = s% u(k)/s% csound(k)
-            end do
-         end subroutine update_star_data
-         
-         subroutine get1_vector(selector, d, ierr)
-            integer, intent(in) :: selector
-            real(dp) :: d(:)
-            integer, intent(out) :: ierr
-            ierr = 0
-            !ipar(1) = selector
-            !ierr = f_dispatch_c(3, &
-            !   lrpar, rpar(1), lipar, ipar(1), s% nz, d(1), lidat, idat(1))
-         end subroutine get1_vector
-         
+         ierr = -1 ! to terminate the star run         
       end subroutine do_imex
 
 

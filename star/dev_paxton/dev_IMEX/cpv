@@ -1,8 +1,0 @@
-#!/bin/bash
-
-mkdir src_$1
-cp src/* src_$1
-
-cp make/makefile make/makefile_$1
-
-

@@ -1,0 +1,27 @@
+&imex_controls
+   ! 2001 bates et al "Barenblatt test"
+   ! Nonlinear thermal conduction from a point source
+   ! hydrodynamic motion disabled
+
+   problem_number = 1
+   nz = 200
+   time_end = 0.3d0
+   initial_dt = 1d-28
+   
+   CFL_front = 1d-3
+   
+   thermal_diffusion_only = .true.
+   include_P_in_momentum_flux = .true.
+   tol_resid_norm = 1d-8
+   tol_resid_max = 1d-7
+   newton_iter_max = 50
+   
+   ! TESTING
+   TC0 = 0d0
+   !stage1_only = .true.
+   include_P_in_momentum_flux = .false.
+   
+   
+   stage1_only = .true. ! debugging         
+   
+/
