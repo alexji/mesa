@@ -21,9 +21,8 @@
 
 ! eos 
    gamma = 5d0/3d0
-   Cv = 1d0
-   ! Rgas = Cv*(gamma - 1d0)
-   crad = 1d-5
+   cgas = -1 ! will be set to mesa's cgas
+   crad = -1 ! will be set to mesa's crad
 
 ! opacity
    ! L_rad = - area * TC * dT/dr
@@ -36,16 +35,19 @@
 ! timesteps
    CFL = 0.5d0
    CFL_front = 0.5d0
-   max_timestep_factor = 1.2d0
-   limit_dE_div_E = 0.1d0
+   max_timestep_factor = 1.5d0
 
 ! solver
    include_P_in_momentum_flux = .true.
-   thermal_diffusion_only = .false.
    tol_resid_norm = 1d-8
    tol_resid_max = 1d-6
-   newton_iter_max = 5 ! 50
+   newton_iter_max = 50
    stage1_only = .false.
+   use_HLLC = .true.
+   use_T_prev_for_L = .false.
+   low_energy_density_regime = .false.
+   thermal_diffusion_only = .false.
+   time_centering = .false.
    
 ! run_star_extras do_imex params
    nsteps_per_call = 1000

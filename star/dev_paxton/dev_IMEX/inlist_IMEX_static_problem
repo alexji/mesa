@@ -3,9 +3,9 @@
 
    problem_number = 0
    nz = 200
-   time_end = 1d3
+   time_end = 10
    initial_dt = 1d-10         
-   
-   stage1_only = .true. ! debugging         
+
+   nsteps_per_call = 100
    
 /

@@ -131,19 +131,37 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
-         how_many_extra_history_columns = 0
+         how_many_extra_history_columns = 8
       end function how_many_extra_history_columns
       
       
       subroutine data_for_extra_history_columns(id, n, names, vals, ierr)
+         use imex_work
+         use imex_output, only: prim, T
+         use imex, only: get_imex_total_energies
          integer, intent(in) :: id, n
          character (len=maxlen_history_column_name) :: names(n)
          real(dp) :: vals(n)
          integer, intent(out) :: ierr
          type (star_info), pointer :: s
+         integer :: i, k
+         real(dp) :: &
+            sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
+         call get_imex_total_energies(prim, T, &
+            sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT)
+         i = 1
+         names(i) = 'dt_advec'; vals(i) = dt_advection; i=i+1
+         names(i) = 'dt_grid'; vals(i) = dt_grid; i=i+1
+         names(i) = 'dt_max'; vals(i) = dt_max_new; i=i+1
+         names(i) = 'dt_front'; vals(i) = dt_front_v; i=i+1
+         names(i) = 'sum_ETOT'; vals(i) = sum_ETOT; i=i+1
+         names(i) = 'sum_EKIN'; vals(i) = sum_EKIN_actual; i=i+1
+         names(i) = 'sum_EGAS'; vals(i) = sum_EGAS; i=i+1
+         names(i) = 'sum_ERAD'; vals(i) = sum_ERAD; i=i+1
+         !names(i) = ''; vals(i) = ; i=i+1
       end subroutine data_for_extra_history_columns
 
       
@@ -155,22 +173,64 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
-         how_many_extra_profile_columns = 0
+         how_many_extra_profile_columns = 12
       end function how_many_extra_profile_columns
       
       
       subroutine data_for_extra_profile_columns(id, n, nz, names, vals, ierr)
          use star_def, only: star_info, maxlen_profile_column_name
          use const_def, only: dp
+         use imex, only: i_rho, i_mom, i_etot, stage1_only
+         use imex_work
+         use imex_output
          integer, intent(in) :: id, n, nz
          character (len=maxlen_profile_column_name) :: names(n)
          real(dp) :: vals(nz,n)
          integer, intent(out) :: ierr
          type (star_info), pointer :: s
-         integer :: k
+         integer :: k, i
+         include 'formats'
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
+         i = 1
+         names(i) = 'drho_dt0'; i=i+1
+         names(i) = 'drho_dt1'; i=i+1
+         names(i) = 'dv_dt0'; i=i+1
+         names(i) = 'dv_dt1'; i=i+1
+         names(i) = 'detot_dt0'; i=i+1
+         names(i) = 'detot_dt1'; i=i+1
+         names(i) = 'imex1'; i=i+1
+         names(i) = 'imex2'; i=i+1
+         names(i) = 'imex3'; i=i+1
+         names(i) = 'imex4'; i=i+1
+         names(i) = 'imex5'; i=i+1
+         names(i) = 'imex6'; i=i+1
+         
+         do k=1,nz
+            i = 1
+            if (stage1_only) then
+               vals(k,i) = d_cons_dt_X0(i_rho,k)/dVol(k); i=i+1
+               vals(k,i) = 0d0; i=i+1
+               vals(k,i) = d_cons_dt_X0(i_mom,k)/cons(i_rho,k); i=i+1
+               vals(k,i) = 0d0; i=i+1
+               vals(k,i) = d_cons_dt_X0(i_etot,k)/dVol(k); i=i+1
+               vals(k,i) = 0d0; i=i+1
+            else
+               vals(k,i) = d_cons_dt_X0(i_rho,k)/dVol(k); i=i+1
+               vals(k,i) = d_cons_dt_X1(i_rho,k)/dVol(k); i=i+1
+               vals(k,i) = d_cons_dt_X0(i_mom,k)/cons_1(i_rho,k); i=i+1
+               vals(k,i) = d_cons_dt_X1(i_mom,k)/cons(i_rho,k); i=i+1
+               vals(k,i) = d_cons_dt_X0(i_etot,k)/dVol(k); i=i+1
+               vals(k,i) = d_cons_dt_X1(i_etot,k)/dVol(k); i=i+1
+            end if
+            vals(k,i) = imex1(k); i=i+1
+            vals(k,i) = imex2(k); i=i+1
+            vals(k,i) = imex3(k); i=i+1
+            vals(k,i) = imex4(k); i=i+1
+            vals(k,i) = imex5(k); i=i+1
+            vals(k,i) = imex6(k); i=i+1
+         end do
       end subroutine data_for_extra_profile_columns
       
 
@@ -196,7 +256,7 @@
          type (star_info), pointer :: s
          integer, intent(out) :: ierr
          integer :: nsteps_taken, i, nz
-         real(dp) :: time, dt, total_energy_initial, total_energy
+         real(dp) :: time, dt, total_energy_initial
          logical :: final_step, must_write_files
          include 'formats'
          if (max_calls <= 0) then
@@ -209,7 +269,7 @@
          if (ierr /= 0) stop 'start_imex error'
          do i = 1, max_calls
             call steps_imex( &
-               nsteps_per_call, time, dt, total_energy, &
+               nsteps_per_call, time, dt, &
                final_step, nsteps_taken, nz, ierr)
             if (ierr /= 0) stop 'steps_imex error'
             s% nz = nz
@@ -225,9 +285,6 @@
                s% v_flag = .true.; s% u_flag = .false. ! for profile_getval
                call read_pgstar_controls(s, ierr) 
                if (ierr /= 0) stop 'do_imex read_pgstar_controls error'
-               write(*,2) 'do_imex time, dt, total_energy, log_rel_run_E_err', &
-                  s% model_number, time, dt, total_energy, &
-                  safe_log10(abs((total_energy - total_energy_initial)/total_energy))
                if (final_step) write(*,*) 'done'
                must_write_files = final_step .and. s% job% save_pgstar_files_when_terminate
                call update_pgstar_plots(s, must_write_files, ierr)

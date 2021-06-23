@@ -48,6 +48,9 @@ run_star_extras.o: $(WORK_SRC_DIR)/run_star_extras.f90
 	$(WORK_COMPILE) -I $(MESA_CONTRIB_DIR)/hooks $<
 endif
 
+imex.o: $(WORK_SRC_DIR)/imex.f90
+	$(WORK_COMPILE) -O3 $<
+	
 %.o: $(WORK_SRC_DIR)/%.f90
 	$(WORK_COMPILE) $<
 

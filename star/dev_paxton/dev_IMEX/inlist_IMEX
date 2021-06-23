@@ -31,7 +31,7 @@
 
 &pgstar
 
-   pause = .true.
+   !pause = .true.
    !pause_interval = 1000
    pgstar_interval = 1
       

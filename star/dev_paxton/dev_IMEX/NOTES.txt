@@ -24,20 +24,20 @@ cons = prim*dVol = (MASS, MOM, ETOT)
 
 Eulerian PDEs for prim
 d(rho)/dt + 1/r^2*d(r^2*rho*vel)/dr = 0
-d(rho_v)/dt + 1/r^2*d(r^2*vel*rho_v)/dr + dPtot/dr = 0   
+d(mom)/dt + 1/r^2*d(r^2*mom*vel)/dr + dPtot/dr = 0   
 d(energy)/dt + 1/r^2*d(r^2*vel*(energy + Ptot))/dr = 1/r^2*d(r^2*D*d(T^4)/dr)/dr
       D = diffusion coefficient
       
 Eulerian conservation form PDEs for cons
    d(MASS)/dt = mass_flux_in - mass_flux_out
-      mass_flux = area*rho*vel
+      mass_flux = area*(rho*vel)_face
    d(MOM)/dt = mom_flux_in - mom_flux_out + geometry_source
-      mom_flux = area*(rho_v*vel + Ptot)
-      geometry_source = (area_out - area_in)*Ptot
+      mom_flux = area*(rho*vel^2 + Ptot)_face
+      geometry_source = (area_out - area_in)*Ptot_cell
    d(ETOT)/dt = energy_flux_in - energy_flux_out + diffusion_source
-      energy_flux = area*(energy + Ptot)*vel
+      energy_flux = area*((energy + Ptot)*vel)_face
       diffusion_source = Lrad_in - Lrad_out
-      Lrad = -area*D*d(T^4)/dr
+      Lrad = -area*D*(d(T^4)/dr)_face
 
 write eqns as d(cons)/dt = F(cons) + G(cons) with F for explicit terms and G for implicit ones
    F_MASS = mass_flux_in - mass_flux_out

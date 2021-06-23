@@ -10,15 +10,17 @@
       use const_def, only: dp
       integer :: model_number, stage, newton_iter
       real(dp) :: resid_norm, tol_resid_norm, &
-         time, dt, dt_next, gam, delta, Rgas
+         time, dt, dt_next, gam, delta, Cv
       real(dp), dimension(:), allocatable :: &
          sub, diag, sup, bp, vp, xp, &
          r, area, Vol, dr, dr_bar, dVol, & 
-         Eeos_x, rhs, deltaT, P_face, &
-         T_start, T_1, d_ETOT_dt_I1, d_ETOT_dt_I2
+         Eeos_x, rhs, deltaT, P_face, L_start, &
+         T_start, T_1, d_ETOT_dt_I1, d_ETOT_dt_I2, &
+         imex1, imex2, imex3, imex4, imex5, imex6
       real(dp), dimension(:,:), allocatable :: &
          prim_start, cons_start, prim_1, cons_1, &
          grad_cell, flux_face, d_cons_dt_X0, d_cons_dt_X1
+      real(dp) :: dt_advection, dt_grid, dt_max_new, dt_front_v, total_KE
    end module imex_work
 
    module imex_output
@@ -61,6 +63,12 @@
          include 'formats'
          ierr = 0
          write(*,*) 'start_imex'
+         if (crad < 0d0) crad = 7.5657332502799993d-015 ! crad in mesa
+         if (cgas < 0d0) cgas = 8.314462618d7 ! cgas in mesa
+         Cv = cgas/(gamma - 1d0)
+         write(*,1) 'cgas', cgas
+         write(*,1) 'gamma', gamma
+         write(*,1) 'Cv', Cv
          select case(problem_number)
          case (0)
             call initialize_static_problem()
@@ -73,25 +81,24 @@
             write(*,*) 'bad problem_number for imex', problem_number
             return
          end select
-         
-         Rgas = Cv*(gamma - 1d0)
          model_number = initial_model_number
          time = initial_time
          dt_next = initial_dt
-         
          call alloc_work_arrays()
          call set_grid_vars()
          call set_init_prim_cons_T()
          total_energy_initial = sum(cons(i_etot,1:nz))
-         write(*,1) 'total_energy_initial', total_energy_initial
          !stop 'start_imex'
                   
          contains
          
          subroutine set_init_prim_cons_T()
             integer :: k, j
+            real(dp) :: &
+               sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT
             include 'formats'
             do k=1,nz
+               !write(*,2) 'set_init_prim_cons_T rho_init', k, rho_init(k)
                T(k) = get_T(rho_init(k), mom_init(k), etot_init(k))
                prim(i_rho,k) = rho_init(k)
                prim(i_mom,k) = mom_init(k)
@@ -99,20 +106,39 @@
                do j=1,nvar
                   cons(j,k) = prim(j,k)*dVol(k)
                end do
+               L(k) = 0d0
+               v_face(k) = 0d0
+               imex1(k) = rho_init(k)
+               imex2(k) = mom_init(k)
+               imex3(k) = etot_init(k)
+               imex4(k) = T(k)
                !write(*,2) 'r T rho etot', k, r(k), T(k), rho_init(k), etot_init(k)
             end do
+            call get_imex_total_energies(prim, T, &
+               sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT)
+            !write(*,1) 'initial sum_EKIN_actual', sum_EKIN_actual
+            !write(*,1) 'initial sum_EKIN_for_ETOT', sum_EKIN_for_ETOT
+            !write(*,1) 'initial sum_EGAS', sum_EGAS
+            !write(*,1) 'initial sum_ERAD', sum_ERAD
+            !write(*,1) 'initial sum_ETOT', sum_ETOT  
+            !write(*,2) 'prim(i_etot,nz)', nz, prim(i_etot,nz)
+            !write(*,2) 'cons(i_etot,nz)', nz, cons(i_etot,nz)
+            !write(*,2) 'T', nz, T(nz)
+            !write(*,2) 'T', nz-1, T(nz-1)
+            !write(*,*)          
          end subroutine set_init_prim_cons_T
          
          subroutine alloc_work_arrays()
             allocate(&
                r(nz), area(nz), Vol(nz), dr(nz), dr_bar(nz), dVol(nz), & 
                Eeos_x(nz), rhs(nz), sub(nz), diag(nz), sup(nz), deltaT(nz), &
-               bp(nz), vp(nz), xp(nz), P_face(nz), &
+               bp(nz), vp(nz), xp(nz), P_face(nz), L_start(nz), &
                T_start(nz), T_1(nz), T(nz), L(nz), v_face(nz), csound(nz), &
                d_ETOT_dt_I1(nz), d_ETOT_dt_I2(nz), &
                prim_start(nvar,nz), cons_start(nvar,nz), &
                prim_1(nvar,nz), cons_1(nvar,nz), &
                prim(nvar,nz), cons(nvar,nz), &
+               imex1(nz), imex2(nz), imex3(nz), imex4(nz), imex5(nz), imex6(nz), &
                grad_cell(nvar,nz), flux_face(nvar,nz), &
                d_cons_dt_X0(nvar,nz), d_cons_dt_X1(nvar,nz))            
          end subroutine alloc_work_arrays
@@ -167,8 +193,8 @@
             r_out(k) = r(k)
             rho_out(k) = rho
             E_out(k) = prim(i_etot,k)
-            Pgas = (gamma-1d0)*rho*Cv*T(k)
-            Prad = crad*pow4(T(k))/3
+            Pgas = get_Pgas(rho,T(k))
+            Prad = get_Prad(T(k))
             P_out(k) = Pgas + Prad
             v_out(k) = v
             T_out(k) = T(k)
@@ -177,18 +203,47 @@
             v_div_cs_out(k) = v_out(k)/cs_out(k)
          end do
       end subroutine get_imex_data
+      
+      
+      subroutine get_imex_total_energies( &
+            prim, T, sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT)
+         use imex_work
+         real(dp), intent(in) :: prim(:,:), T(:)
+         real(dp), intent(out) :: &
+            sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT
+         integer :: k
+         real(dp) :: rho, Etot, Egas, Erad, Ekin, v
+         sum_ETOT = 0d0
+         sum_EKIN_for_ETOT = 0d0
+         sum_EGAS = 0d0
+         sum_ERAD = 0d0
+         sum_EKIN_actual = 0d0
+         do k=1,nz
+            rho = prim(i_rho,k)
+            Etot = prim(i_etot,k)
+            Egas = rho*Cv*T(k)
+            Erad = crad*pow4(T(k))
+            Ekin = Etot - (Egas + Erad)
+            v = prim(i_mom,k)/rho
+            sum_EKIN_actual = sum_EKIN_actual + 0.5d0*rho*pow2(v)*dVol(k)
+            sum_EKIN_for_ETOT = sum_EKIN_for_ETOT + Ekin*dVol(k)
+            sum_EGAS = sum_EGAS + Egas*dVol(k)
+            sum_ERAD = sum_ERAD + Erad*dVol(k)
+            sum_ETOT = sum_ETOT + Etot*dVol(k)
+         end do      
+      end subroutine get_imex_total_energies
 
       
       subroutine steps_imex( &
-            max_steps_for_this_call, age, timestep, total_energy, &
+            max_steps_for_this_call, age, timestep, &
             final_step, mod_number, num_zones, ierr)
          use imex_work
          use imex_output
          integer, intent(in) :: max_steps_for_this_call
-         real(dp), intent(out) :: age, timestep, total_energy
+         real(dp), intent(out) :: age, timestep
          logical, intent(out) :: final_step
          integer, intent(out) :: mod_number, num_zones, ierr
-         integer :: step
+         integer :: step, k
          include 'formats'
          ierr = 0
          final_step = .true.
@@ -207,7 +262,17 @@
          timestep = dt
          num_zones = nz
          mod_number = model_number
-         total_energy = sum(cons(i_etot,1:nz))
+         call report_energies()
+         if (final_step) then
+            select case(problem_number)
+            case (0)
+               call finish_static_problem()
+            case (1)
+               call finish_Barenblatt_problem()
+            case (2)
+               call finish_smooth_problem()
+            end select
+         end if
          
          contains
          
@@ -221,6 +286,20 @@
                end do
             end do
          end subroutine save_start_values
+         
+         subroutine report_energies()
+            real(dp) :: &
+               sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT
+            include 'formats'
+            call get_imex_total_energies(prim, T, &
+               sum_EKIN_actual, sum_EKIN_for_ETOT, sum_EGAS, sum_ERAD, sum_ETOT)
+            !write(*,1) 'sum_EKIN_actual', sum_EKIN_actual
+            !write(*,1) 'sum_EKIN_for_ETOT', sum_EKIN_for_ETOT
+            !write(*,1) 'sum_EGAS', sum_EGAS
+            !write(*,1) 'sum_ERAD', sum_ERAD
+            !write(*,1) 'sum_ETOT', sum_ETOT  
+            !write(*,*)          
+         end subroutine report_energies
          
       end subroutine steps_imex
       
@@ -248,8 +327,12 @@
          ierr = 0
          newton_iter = 0
          dt = dt_next
-         write(*,2) 'do_step dt', model_number, dt, time
-         if (dt == 0d0) stop 'do_step'
+         if (time_centering) call save_start_values()
+         !write(*,2) 'do_step dt time', model_number, dt, time
+         if (dt == 0d0) then
+            write(*,2) 'dt == 0d0', model_number, dt, time
+            stop 'do_step'
+         end if
          final_step = (time + dt >= time_end)
          if (final_step) dt = time_end - time
          stage = 1
@@ -267,7 +350,8 @@
                return
             end if
          else 
-            ! 2016_Wang_Shu_Zang; 1997_ascher_ruuth_spiteri
+            ! 1997_ascher_ruuth_spiteri L-stable, 2 stage, 2nd order (section 2.6)
+            ! also try L-stable, 3 stage implicit, 4 stage explicit, 3rd order DIRK (section 2.7)
             gam = 1d0 - sqrt(2d0)/2d0
             delta = 1d0 - 1d0/(2d0*gam)
             call stage1( &
@@ -298,13 +382,23 @@
       end function do_step
       
       
+      subroutine save_start_values()
+         use imex_output, only: L
+         use imex_work, only: L_start
+         integer :: k
+         do k=1,nz
+            L_start(k) = L(k)
+         end do
+      end subroutine save_start_values
+      
+      
       subroutine stage1( &
             T_0, prim_0, cons_0, & ! input
             grad_cell, flux_face, & ! work
             d_cons_dt_X0, d_ETOT_dt_I1, & ! output
             T_1, prim_1, cons_1, L_1, v_face_1, & ! output
             ierr)
-         use imex_work, only: dt, gam, dVol
+         use imex_work, only: dt, gam, dVol, model_number
          real(dp), intent(in), dimension(:) :: T_0
          real(dp), intent(in), dimension(:,:) ::  cons_0, prim_0
          real(dp), intent(out), dimension(:) :: &
@@ -317,16 +411,24 @@
          ierr = 0
          call calc_explicit( &
             T_0, prim_0, cons_0, grad_cell, flux_face, d_cons_dt_X0, v_face_1, ierr)
-         if (ierr /= 0) return
+         if (ierr /= 0) then
+            write(*,2) 'stage1 calc_explicit failed', model_number
+            return
+         end if
          do k=1,nz ! update explicit intermediate result
             do j=1,nvar
                cons_1(j,k) = cons_0(j,k) + dt*gam*d_cons_dt_X0(j,k)
                prim_1(j,k) = cons_1(j,k)/dVol(k)
             end do
-            !write(*,2) 'v rho mom etot', k, prim_1(i_mom,k)/prim_1(i_rho,k), prim_1(:,k)
          end do
          call calc_implicit(T_0, prim_1, cons_1, d_ETOT_dt_I1, T_1, L_1, ierr)
-         if (ierr /= 0) return
+         if (ierr /= 0) then
+            write(*,2) 'stage1 calc_implicit failed', model_number
+            return
+         end if
+         k = nz
+         !write(*,2) 'ETOT dETOT T', nz, cons_1(i_etot,k), dt*gam*d_ETOT_dt_I1(k), T_1(k)
+         !stop 'stage1'
          do k=1,nz ! update etot
             cons_1(i_etot,k) = cons_1(i_etot,k) + dt*gam*d_ETOT_dt_I1(k)
             prim_1(i_etot,k) = cons_1(i_etot,k)/dVol(k)
@@ -339,7 +441,7 @@
             grad_cell, flux_face, d_cons_dt_X1, d_ETOT_dt_I2, & ! work
             T_2, prim_2, cons_2, L_2, v_face_2, & ! output
             ierr)
-         use imex_work, only: dt, gam, delta, dVol
+         use imex_work, only: dt, gam, delta, dVol, model_number
          real(dp), intent(in), dimension(:) :: &
             T_1, d_ETOT_dt_I1
          real(dp), intent(in), dimension(:,:) :: &
@@ -354,7 +456,10 @@
          ierr = 0
          call calc_explicit( &
             T_1, prim_1, cons_1, grad_cell, flux_face, d_cons_dt_X1, v_face_2, ierr)
-         if (ierr /= 0) return
+         if (ierr /= 0) then
+            write(*,2) 'stage2 calc_explicit failed', model_number
+            return
+         end if
          do k=1,nz ! update explicit intermediate result
             do j=1,nvar
                cons_2(j,k) = cons_0(j,k) + &
@@ -365,7 +470,10 @@
             end do
          end do
          call calc_implicit(T_1, prim_2, cons_2, d_ETOT_dt_I2, T_2, L_2, ierr)
-         if (ierr /= 0) return
+         if (ierr /= 0) then
+            write(*,2) 'stage2 calc_implicit failed', model_number
+            return
+         end if
          do k=1,nz ! update etot
             cons_2(i_etot,k) = cons_2(i_etot,k) + dt*gam*d_ETOT_dt_I2(k)
             prim_2(i_etot,k) = cons_2(i_etot,k)/dVol(k)
@@ -374,48 +482,25 @@
             
       
       real(dp) function pick_next_timestep(T_2, prim_2, T_0, prim_0)
-         use imex_work, only: dt
+         use imex_work, only: dt, &
+            dt_advection, dt_grid, dt_max_new, dt_front_v
          real(dp), intent(in), dimension(:) :: T_2, T_0
          real(dp), intent(in), dimension(:,:) ::  prim_2, prim_0
-         real(dp) :: dt_advection, dt_grid, dt_rel_dE, dt_front_v, dt_max_new
          include 'formats'
          dt_advection = get_min_dt_advection(T_2, prim_2)
          dt_grid = get_min_dt_grid()
-         dt_rel_dE = get_dt_rel_dE(prim_0, prim_2)
          dt_front_v = get_dt_front_v(prim_0, prim_2)
          dt_max_new = dt*max_timestep_factor
-         pick_next_timestep = &
-            min(dt_advection, dt_grid, dt_rel_dE, dt_front_v, dt_max_new)
-         !write(*,1) 'dt_advection', dt_advection
-         !write(*,1) 'dt_grid', dt_grid
-         !write(*,1) 'dt_rel_dE', dt_rel_dE
-         !write(*,1) 'dt_front_v', dt_front_v
-         !write(*,1) 'dt_max_new', dt_max_new
-         !write(*,1) 'pick_next_timestep', pick_next_timestep
+         pick_next_timestep = min(dt_advection, dt_grid, dt_max_new, dt_front_v)
       end function pick_next_timestep
       
       
-      real(dp) function get_dt_rel_dE(prim_start, prim_end) result(dt_rel_dE)
-         use imex_work, only: dt
-         real(dp), intent(in) :: prim_start(:,:), prim_end(:,:)
-         real(dp) :: etot_min, max_dE_div_E
-         etot_min = minval(prim_end(i_etot,1:nz))
-         max_dE_div_E = &
-            maxval(abs(prim_end(i_etot,1:nz) - prim_start(i_etot,1:nz))/ &
-               (prim_end(i_etot,1:nz) + etot_min))
-         if (max_dE_div_E <= 1d-5*limit_dE_div_E) then
-            dt_rel_dE = dt*max_timestep_factor
-         else
-            dt_rel_dE = dt*sqrt(limit_dE_div_E/max_dE_div_E)
-         end if
-      end function get_dt_rel_dE
-      
-      
       real(dp) function get_dt_front_v(prim_start, prim_end) result(dt_front_v)
-         use imex_work, only: dt
+         use imex_work, only: dt, model_number
          real(dp), intent(in) :: prim_start(:,:), prim_end(:,:)
          real(dp) :: sum_dE_dt, sum_dE
          integer :: k
+         include 'formats'
          sum_dE_dt = 0d0
          do k=1,nz
             sum_dE_dt = abs(prim_end(i_etot,k) - prim_start(i_etot,k))/dt
@@ -424,11 +509,14 @@
          do k=2,nz-1
             sum_dE = 0.5d0*abs(prim_end(i_etot,k-1) - prim_end(i_etot,k+1))
          end do
+         sum_dE = abs(prim_end(i_etot,1) - prim_end(i_etot,2))
+         sum_dE = abs(prim_end(i_etot,nz-1) - prim_end(i_etot,nz))
          if (sum_dE_dt <= 1d-5*sum_dE + 1d-20) then
             dt_front_v = dt*max_timestep_factor
          else
             dt_front_v = CFL_front*sum_dE/sum_dE_dt
          end if
+         !write(*,2) 'dt_front_v sum_dE_dt sum_dE', model_number, dt_front_v, sum_dE_dt, sum_dE
       end function get_dt_front_v
       
       
@@ -442,9 +530,9 @@
          dt_advection = 1d99
          do k=1,nz
             rho = prim(i_rho,k)
-            csound(k) = get_csound(T(k), rho)
+            csound(k) = get_csound(rho, T(k))
             vel = prim(i_mom,k)/rho
-            dt_cell = dr(k)/abs(vel + csound(k))
+            dt_cell = dr(k)/(abs(vel) + csound(k))
             if (dt_cell < dt_advection) dt_advection = dt_cell
          end do
          dt_advection = CFL*dt_advection
@@ -472,7 +560,7 @@
             T_prev, prim, cons, & ! input
             d_ETOT_dt_I, T, L, & ! output
             ierr)
-         use imex_work, only: newton_iter, stage, Eeos_x, rhs, dVol
+         use imex_work, only: newton_iter, stage, Eeos_x, rhs, dVol, model_number
          real(dp), intent(in) :: T_prev(:)
          real(dp), intent(in), dimension(:,:) :: prim, cons
          real(dp), intent(out), dimension(:) :: d_ETOT_dt_I, T, L ! output
@@ -482,6 +570,12 @@
          logical :: converged
          include 'formats'        
          ierr = 0 
+         if (TC0 == 0d0) then ! no thermal diffusion
+            do k=1,nz
+               d_ETOT_dt_I(k) = 0d0
+            end do
+            return
+         end if
          do k=1,nz
             rho = prim(i_rho,k)
             v = prim(i_mom,k)/rho
@@ -494,12 +588,19 @@
          do newton_iter = 1, newton_iter_max         
             !$OMP PARALLEL DO PRIVATE(k)
             do k=1,nz
-               call store_matrix_equation(k) ! sets d_ETOT_dt_I(k) and L(k)
+               call store_matrix_equation(T,T_prev,k) ! sets d_ETOT_dt_I(k) and L(k)
             end do
             !$OMP END PARALLEL DO
             resid_norm = sum(abs(rhs(1:nz)))/nz
             resid_max = maxval(abs(rhs(1:nz)))
-            !write(*,4) 'resid norm max', newton_iter, stage, model_number, resid_norm, resid_max
+            if (is_bad(resid_norm) .or. is_bad(resid_max)) then
+               write(*,4) 'resid norm max', newton_iter, stage, model_number, resid_norm, resid_max
+               do k=1,nz
+                  if (is_bad(rhs(k))) then
+                     write(*,2) 'rhs', k, rhs(k)
+                  end if
+               end do
+            end if
             if (resid_norm <= tol_resid_norm .and. resid_max <= tol_resid_max) then
                converged = .true.
                exit
@@ -508,29 +609,74 @@
          end do         
          newton_iter = 0
          if (.not. converged) then
+            write(*,2) 'calc_implicit failed to converge', model_number, resid_norm, resid_max
             ierr = -1
             return
          end if
          
          contains
          
-         subroutine store_matrix_equation(k)
-            use imex_work, only: dt, gam, dVol, sub, diag, sup, rhs
+         subroutine store_matrix_equation(T,T_prev,k)
+            use imex_work, only: dt, Cv, gam, dVol, sub, diag, sup, rhs
             integer, intent(in) :: k
+            real(dp), intent(in) :: T(:), T_prev(:)
             type(auto_diff_real_4var_order1) :: &
-               T_00, L_00, L_p1, Eeos_expected, Eeos_actual, residual
+               T_00, L_00, L_p1, dL, Eeos_expected, Eeos_actual, residual
+            real(dp) :: rho
             include 'formats'
             T_00 = wrap_T_00(T,k)
-            L_00 = get_L_face(T,prim,k)
+            if (use_T_prev_for_L) then
+               L_00 = get_L_face(T_prev,prim,k)
+            else
+               L_00 = get_L_face(T,prim,k)
+            end if
             L(k) = L_00%val
             if (k == nz) then
                L_p1 = L_inner
             else
-               L_p1 = shift_p1(get_L_face(T,prim,k+1))
+               if (use_T_prev_for_L) then
+                  L_p1 = get_L_face(T_prev,prim,k+1)
+               else
+                  L_p1 = get_L_face(T,prim,k+1)
+               end if
+               L_p1 = shift_p1(L_p1)
             end if
-            d_ETOT_dt_I(k) = L_p1%val - L_00%val
-            Eeos_expected = Eeos_X(k) + dt*gam*(L_p1 - L_00)
-            Eeos_actual = (crad*pow4(T_00) + rho*Cv*T_00)*dVol(k)
+            dL = L_00 - L_p1
+            if (use_T_prev_for_L) then
+               dL%d1val1 = 0d0
+               dL%d1val2 = 0d0
+               dL%d1val3 = 0d0
+            end if
+            d_ETOT_dt_I(k) = -dL%val
+            Eeos_expected = Eeos_X(k) - dt*gam*dL
+            if (is_bad(Eeos_expected%val)) then
+               !$omp critical (store_matrix_equation_crit1)
+               write(*,2) 'Eeos_expected%val', k, Eeos_expected%val
+               write(*,2) 'Eeos_X(k)', k, Eeos_X(k)
+               write(*,2) 'L_00%val', k, L_00%val
+               write(*,2) 'L_p1%val', k, L_p1%val
+               write(*,2) 'dt', k, dt
+               write(*,2) 'gam', k, gam
+               write(*,*) 'use_T_prev_for_L', use_T_prev_for_L
+               write(*,2) 'T_prev', k, T_prev(k)
+               if (k < nz) write(*,2) 'T_prev', k+1, T_prev(k+1)
+               stop 'store_matrix_equation'
+               !$omp end critical (store_matrix_equation_crit1)
+            end if
+            rho = prim(i_rho,k)
+            Eeos_actual = rho*Cv*T_00*dVol(k)
+            if (.not. low_energy_density_regime) &
+               Eeos_actual = Eeos_actual + crad*pow4(T_00)*dVol(k)
+            if (is_bad(Eeos_actual%val)) then
+               !$omp critical (store_matrix_equation_crit2)
+               write(*,2) 'Eeos_actual%val', k, Eeos_actual%val
+               write(*,2) 'T_00%val', k, T_00%val
+               write(*,2) 'L_p1%val', k, L_p1%val
+               write(*,2) 'dVol(k)', k, dVol(k)
+               write(*,2) 'gam', k, gam
+               stop 'store_matrix_equation'
+               !$omp end critical (store_matrix_equation_crit2)
+            end if
             residual = Eeos_actual - Eeos_expected
             rhs(k) = -residual%val
             if (k > 1) sub(k-1) = residual%d1val1
@@ -552,13 +698,14 @@
             do k=1,nz
                T(k) = T(k) + deltaT(k)
             end do            
+            !write(*,2) 'T', nz, T(nz)
          end subroutine solve_matrix_equation
 
       end subroutine calc_implicit
       
       
       function get_L_face(T,prim,k) result(L_face) ! luminosity (by radiative diffusion)
-         use imex_work, only: area, dr_bar
+         use imex_work, only: area, dr_bar, L_start
          type(auto_diff_real_4var_order1) :: L_face
          real(dp), intent(in) :: T(:), prim(:,:)
          integer, intent(in) :: k
@@ -569,32 +716,42 @@
          end if
          T_00 = wrap_T_00(T,k)
          if (k == 1) then
-            L_face = Lsurf_factor * area(k) * clight * crad * pow4(T_00)
+            if (low_energy_density_regime) then
+               L_face = 0d0
+            else
+               L_face = Lsurf_factor * area(k) * clight * crad * pow4(T_00)
+            end if
          else
             T_m1 = wrap_T_m1(T,k)
             TC = get_TC_face(T_00,T_m1,k)
             L_face = -area(k)*TC*(T_m1 - T_00)/dr_bar(k)
          end if
+         if (time_centering) L_face = 0.5d0*(L_face + L_start(k))
          
          contains
          
          function get_TC_face(T_00,T_m1,k) result(TC_face) ! thermal conductivity at face
             use imex_work, only: dr
             integer, intent(in) :: k ! k > 1 and k <= nz
-            type(auto_diff_real_4var_order1) :: T_00, T_m1, TC_face
+            type(auto_diff_real_4var_order1) :: T_00, T_m1, TC_face, T_avg
             type(auto_diff_real_4var_order1) :: TC_00, TC_m1
-            real(dp) :: rho_face
+            real(dp) :: rho_avg
+            rho_avg = 0.5d0*(prim(i_rho,k) + prim(i_rho,k-1))
+            T_avg = 0.5d0*(T_00 + T_m1)
             TC_00 = TC0
             TC_m1 = TC0
             if (TCa /= 0d0) then
-               TC_00 = TC_00*pow(prim(i_rho,k),TCa)
-               TC_m1 = TC_m1*pow(prim(i_rho,k-1),TCa)
+               TC_00 = TC_00*pow(rho_avg,TCa)
+               !TC_00 = TC_00*pow(prim(i_rho,k),TCa)
+               !TC_m1 = TC_m1*pow(prim(i_rho,k-1),TCa)
             end if
             if (TCb /= 0d0) then
-               TC_00 = TC_00*pow(T_00,TCb)
-               TC_m1 = TC_m1*pow(T_m1,TCb)
+               TC_00 = TC_00*pow(T_avg,TCb)
+               !TC_00 = TC_00*pow(T_00,TCb)
+               !TC_m1 = TC_m1*pow(T_m1,TCb)
             end if
-            TC_face = (dr(k-1)*TC_00 + dr(k)*TC_m1)/(dr(k-1) + dr(k))
+            TC_face = TC_00
+            !TC_face = (dr(k-1)*TC_00 + dr(k)*TC_m1)/(dr(k-1) + dr(k))
          end function get_TC_face
          
       end function get_L_face
@@ -646,9 +803,14 @@
          integer, intent(out) :: ierr
          include 'formats'
          ierr = 0
+         if (thermal_diffusion_only) then
+            d_cons_dt_X(:,:) = 0d0
+            v_face(:) = 0d0
+            return
+         end if
          call get_grad_cell(prim, grad_cell, ierr)
          if (ierr /= 0) return
-         call get_flux_face(prim, grad_cell, flux_face, v_face, ierr)
+         call get_flux_face(prim, grad_cell, T, flux_face, v_face, ierr)
          if (ierr /= 0) return
          call get_d_cons_dt_X(flux_face, prim, T, d_cons_dt_X, ierr)
       end subroutine calc_explicit
@@ -703,20 +865,24 @@
       
       subroutine get_flux_face( &
             prim, grad_cell, & ! input
+            T, & ! debugging only
             flux_face, v_face, & ! output
             ierr)
          use imex_work, only: area
-         real(dp), intent(in) :: prim(:,:), grad_cell(:,:)
-         real(dp), intent(out) :: flux_face(:,:), v_face(:)
+         real(dp), intent(in) :: prim(:,:), grad_cell(:,:), T(:)
+         real(dp), intent(out) ::  flux_face(:,:), v_face(:)
          integer, intent(out) :: ierr
          integer :: j, k, op_err
          include 'formats'
          ierr = 0
          
+         if (use_HLLC .and. .not. include_P_in_momentum_flux) &
+            stop 'cannot use_HLLC .and. .not. include_P_in_momentum_flux'
+         
          !$OMP PARALLEL DO PRIVATE(k,op_err)
          do k=2,nz
             op_err = 0
-            if (.false.) then
+            if (use_HLLC) then
                call get1_flux_face_HLLC(k, op_err)
             else
                call get1_flux_face_simple(k, op_err)
@@ -758,12 +924,12 @@
             etotR = primR(i_etot)
             TL = get_T(rhoL, momL, etotL)
             TR = get_T(rhoR, momR, etotR)
-            csL = get_csound(TL,rhoL)
-            csR = get_csound(TR,rhoR)
-            PgasL = (gamma-1)*rhoL*Cv*TL
-            PgasR = (gamma-1)*rhoR*Cv*TR
-            PradL = crad*pow4(TL)/3d0
-            PradR = crad*pow4(TR)/3d0
+            csL = get_csound(rhoL, TL)
+            csR = get_csound(rhoR, TR)
+            PgasL = get_Pgas(rhoL, TL)
+            PgasR = get_Pgas(rhoR, TR)
+            PradL = get_Prad(TL)
+            PradR = get_Prad(TR)
             PL = PgasL + PradL
             PR = PgasR + PradR
             P_face(k) = 0.5d0*(PL + PR)
@@ -777,7 +943,7 @@
             end if
             fluxL(i_etot) = (etotL + PL)*vL
             fluxR(i_etot) = (etotR + PR)*vR
-            alpha = 0d0 ! min(abs(vL-csL),abs(vL+csL),abs(vR-csR),abs(vR+csR))
+            alpha = min(abs(vL-csL),abs(vL+csL),abs(vR-csR),abs(vR+csR))
             do j=1,nvar
                flux_face(j,k) = 0.5d0*(fluxR(j)+fluxL(j) - alpha*(primR(j)-primL(j)))
             end do          
@@ -786,7 +952,7 @@
          
          subroutine get1_flux_face_HLLC(k, ierr) 
             ! for P in momentum flux and geometry momentum source term
-            use imex_work, only: dr
+            use imex_work, only: Cv, dr, imex1, imex2, imex3
             integer, intent(in) :: k
             integer, intent(out) :: ierr
             integer :: j
@@ -800,59 +966,76 @@
                primL(j) = prim(j,k) + grad_cell(j,k)*dr(k)/2d0 ! on left side of face k
                primR(j) = prim(j,k-1) - grad_cell(j,k-1)*dr(k-1)/2d0 ! on right side of face k
             end do
-            rhoL = primL(i_rho); sqrt_rhoL = sqrt(rhoL)
-            rhoR = primR(i_rho); sqrt_rhoR = sqrt(rhoR)
-            momL = primL(i_mom); momR = primR(i_mom)
-            vL = momL/rhoL; vR = momR/rhoR
-            etotL = primL(i_etot); etotR = primR(i_etot)
-            TL = get_T(rhoL, momL, etotL); TR = get_T(rhoR, momR, etotR)
-            PgasL = (gamma-1)*rhoL*Cv*TL; PgasR = (gamma-1)*rhoR*Cv*TR
-            PradL = crad*pow4(TL)/3d0; PradR = crad*pow4(TR)/3d0
-            PL = PgasL + PradL; PR = PgasR + PradR
-            csL = get_csound(TL,rhoL); csR = get_csound(TR,rhoR)
-            fluxL(i_rho) = rhoL*vL; fluxR(i_rho) = rhoR*vR
-            fluxL(i_mom) = momL*vL + PL; fluxR(i_mom) = momR*vR + PR
-            fluxL(i_etot) = (etotL + PL)*vL; fluxR(i_etot) = (etotR + PR)*vR
+            rhoL = primL(i_rho)
+            sqrt_rhoL = sqrt(rhoL)
+            rhoR = primR(i_rho)
+            sqrt_rhoR = sqrt(rhoR)
+            momL = primL(i_mom)
+            momR = primR(i_mom)
+            vL = momL/rhoL
+            vR = momR/rhoR
+            etotL = primL(i_etot)
+            etotR = primR(i_etot)
+            TL = get_T(rhoL, momL, etotL)
+            TR = get_T(rhoR, momR, etotR)
+            PgasL = get_Pgas(rhoL, TL)
+            PgasR = get_Pgas(rhoR, TR)
+            PradL = get_Prad(TL)
+            PradR = get_Prad(TR)
+            PL = PgasL + PradL
+            PR = PgasR + PradR
+            csL = get_csound(rhoL, TL)
+            csR = get_csound(rhoR, TR)
+            fluxL(i_rho) = rhoL*vL
+            fluxR(i_rho) = rhoR*vR
+            fluxL(i_mom) = momL*vL + PL
+            fluxR(i_mom) = momR*vR + PR
+            fluxL(i_etot) = (etotL + PL)*vL
+            fluxR(i_etot) = (etotR + PR)*vR
             v_face(k) = (sqrt_rhoL*vL + sqrt_rhoR*vR)/(sqrt_rhoL + sqrt_rhoR) 
             if (.true.) then ! debugging
                do j=1,nvar
                   flux_face(j,k) = 0.5d0*(fluxR(j) + fluxL(j))
                end do
-               return
-            else if (.false.) then ! Sl and Sr using 1988_einfeldt method
-               eta_2 = 0.5*sqrt_rhoL*sqrt_rhoR/pow2(sqrt_rhoL + sqrt_rhoR)        ! Toro eqn 10.54
-               d_bar = sqrt((sqrt_rhoL*pow2(csL) + sqrt_rhoR*pow2(csR))/ &
-                            (sqrt_rhoL + sqrt_rhoR) + eta_2*pow2(vR - vL))       ! Toro eqn 10.53
-               Sl = v_face(k) - d_bar
-               Sr = v_face(k) + d_bar        ! Toro eqn 10.52    
-            else ! simple wave speeds       ! Toro eqn 10.47
-               Sl = min(vL - csL, vR - csR)
-               Sr = max(vL + csL, vR + csR)
-            end if  
-            if (Sl >= 0d0) then
-               do j=1,nvar
-                  flux_face(j,k) = fluxL(j)
-               end do
-            else if (Sr <= 0d0) then
-               do j=1,nvar
-                  flux_face(j,k) = fluxR(j)
-               end do
             else 
-               rho_v_L = rhoL*(Sl - vL)
-               rho_v_R = rhoR*(Sr - vR)
-               Ss = (PR - PL + vL*rho_v_L - vR*rho_v_R)/(rho_v_L - rho_v_R)  !  Toro 10.37
-               if (Ss > 0d0) then
-                  call get_prim_star(Ss, Sl, vL, rhoL, etotL, PL, prim_star)
+               if (.false.) then ! Sl and Sr using 1988_einfeldt method
+                  eta_2 = 0.5*sqrt_rhoL*sqrt_rhoR/pow2(sqrt_rhoL + sqrt_rhoR)        ! Toro eqn 10.54
+                  d_bar = sqrt((sqrt_rhoL*pow2(csL) + sqrt_rhoR*pow2(csR))/ &
+                               (sqrt_rhoL + sqrt_rhoR) + eta_2*pow2(vR - vL))       ! Toro eqn 10.53
+                  Sl = v_face(k) - d_bar
+                  Sr = v_face(k) + d_bar        ! Toro eqn 10.52    
+               else ! simple wave speeds       ! Toro eqn 10.47
+                  Sl = min(vL - csL, vR - csR)
+                  Sr = max(vL + csL, vR + csR)
+               end if  
+               if (Sl >= 0d0) then
                   do j=1,nvar
-                     flux_face(j,k) = fluxL(j) + Sl*(prim_star(j) - primL(j))      ! Toro 10.38
+                     flux_face(j,k) = fluxL(j)
+                  end do
+               else if (Sr <= 0d0) then
+                  do j=1,nvar
+                     flux_face(j,k) = fluxR(j)
                   end do
                else 
-                  call get_prim_star(Ss, Sr, vR, rhoR, etotR, PR, prim_star)
-                  do j=1,nvar
-                     flux_face(j,k) = fluxR(j) + Sr*(prim_star(j) - primR(j))      ! Toro 10.38
-                  end do
-               end if
+                  rho_v_L = rhoL*(Sl - vL)
+                  rho_v_R = rhoR*(Sr - vR)
+                  Ss = (PR - PL + vL*rho_v_L - vR*rho_v_R)/(rho_v_L - rho_v_R)  !  Toro 10.37
+                  if (Ss > 0d0) then
+                     call get_prim_star(Ss, Sl, vL, rhoL, etotL, PL, prim_star)
+                     do j=1,nvar
+                        flux_face(j,k) = fluxL(j) + Sl*(prim_star(j) - primL(j))      ! Toro 10.38
+                     end do
+                  else 
+                     call get_prim_star(Ss, Sr, vR, rhoR, etotR, PR, prim_star)
+                     do j=1,nvar
+                        flux_face(j,k) = fluxR(j) + Sr*(prim_star(j) - primR(j))      ! Toro 10.38
+                     end do
+                  end if
+               end if            
             end if            
+            !imex1(k) = TL ! fluxL(i_rho) ! flux_face(i_rho,k)
+            !imex2(k) = TR ! fluxL(i_mom) ! flux_face(i_mom,k)
+            !imex3(k) = T(k) ! fluxL(i_etot) ! flux_face(i_etot,k)
          end subroutine get1_flux_face_HLLC
       
          subroutine get_prim_star(Ss, Sk, vK, rhoK, etotK, PK, prim_star)     ! Toro 10.37
@@ -869,11 +1052,12 @@
       end subroutine get_flux_face
       
       
-      real(dp) function get_csound(T, rho) ! 2020_cheng_shu_song, eqn 2.7
-         real(dp), intent(in) :: T, rho
+      real(dp) function get_csound(rho, T) ! 2020_cheng_shu_song, eqn 2.7
+         use imex_work, only: Cv
+         real(dp), intent(in) :: rho, T
          real(dp) :: Pgas, Prad, z, Gamma1
-         Pgas = (gamma-1d0)*Cv*rho*T
-         Prad = crad*pow4(T)/3
+         Pgas = get_Pgas(rho, T)
+         Prad = get_Prad(T)
          z = Prad/Pgas
          Gamma1 = &
             (gamma/(gamma-1d0) + z*(20d0 * 16d0*z))/((1d0/(gamma-1d0) + 12d0*z)*(1d0 + z))
@@ -881,23 +1065,66 @@
       end function get_csound
 
 
+      real(dp) function get_egas(rho, T) result(Egas)
+         use imex_work, only: Cv
+         real(dp), intent(in) :: rho, T
+         Egas = rho*Cv*T
+      end function get_egas
+
+
+      real(dp) function get_erad(T) result(Erad)
+         use imex_work, only: Cv
+         real(dp), intent(in) :: T
+         if (low_energy_density_regime) then
+            Erad = 0d0
+         else
+            Erad = crad*pow4(T)
+         end if
+      end function get_erad
+
+
+      real(dp) function get_Pgas(rho, T) result(Pgas)
+         use imex_work, only: Cv
+         real(dp), intent(in) :: rho, T
+         Pgas = (gamma - 1d0)*get_egas(rho, T)
+      end function get_Pgas
+
+
+      real(dp) function get_Prad(T) result(Prad)
+         real(dp), intent(in) :: T
+         Prad = get_erad(T)/3d0
+      end function get_Prad
+
+
       real(dp) function get_etot(rho, mom, T) result(etot)
+         use imex_work, only: Cv
          real(dp), intent(in) :: rho, mom, T
          real(dp) :: v, Egas, Erad, Ekin
          v = mom/rho
-         Egas = rho*Cv*T
-         Erad = crad*pow4(T)
+         Egas = get_egas(rho, T)
+         Erad = get_erad(T)
          Ekin = 0.5d0*mom*v
          etot = Egas + Erad + Ekin
       end function get_etot
       
       
       real(dp) function get_T(rho, mom, etot) result(T) 
+         use imex_work, only: Cv
          ! solve for T: etot == rho*Cv*T + 0.5*mom*v + crad*T^4   2020_cheng_shu_song
          real(dp), intent(in) :: rho, mom, etot
-         real(dp) :: rhoCv, v, c1, c2, s3, s4, s1, s2, s, sqrt_2s, b1, b1_3, b2, b3, b4, b5
+         real(dp) :: rhoCv, egas, v, c1, c2, s3, s4, s1, s2, s, sqrt_2s, b1, b1_3, b2, b3, b4, b5
+         include 'formats'
          rhoCv = rho*Cv
          v = mom/rho
+         if (low_energy_density_regime) then
+            egas = etot - 0.5d0*mom*v ! ignore Erad
+            T = egas/rhoCv 
+            if (is_bad(T) .or. T < 0d0) then
+               write(*,*) 'T rho rhoCv mom etot egas', T, rho, rhoCv, mom, etot, egas
+               stop 'get_T'
+            end if
+            return
+         end if
          if (crad > 1d-6) then
             c1 = rhoCv/crad
             c2 = -1d0/crad*(etot - 0.5d0*mom*v)
@@ -930,18 +1157,18 @@
          integer, intent(out) :: ierr
          integer :: k, op_err
          ierr = 0
-!         !$OMP PARALLEL DO PRIVATE(k,op_err)
+         !$OMP PARALLEL DO PRIVATE(k,op_err)
          do k=1,nz
             op_err = 0
             call get1_d_cons_dt_X(k, op_err)
             if (op_err /= 0) ierr = op_err
          end do
-!         !$OMP END PARALLEL DO
+         !$OMP END PARALLEL DO
          
          contains
          
          subroutine get1_d_cons_dt_X(k, ierr)
-            use imex_work, only: area, dVol, dr, P_face
+            use imex_work, only: area, dVol, dr, P_face, imex1, imex2, imex3
             use imex_output, only: L
             integer, intent(in) :: k
             integer, intent(out) :: ierr
@@ -949,15 +1176,18 @@
             real(dp) :: Pgas, Prad, Ptot
             include 'formats'
             ierr = 0
-            Pgas = (gamma-1)*prim(i_rho,k)*Cv*T(k)
-            Prad = crad*pow4(T(k))/3d0
-            Ptot = Pgas + Prad
+            Pgas = get_Pgas(prim(i_rho,k),T(k))
+            Prad = get_Prad(T(k))
+            Ptot = Pgas + Prad            
             if (k == nz) then
                do j=1,nvar
                   d_cons_dt_X(j,k) = -area(k)*flux_face(j,k)
                end do
                if (include_P_in_momentum_flux) then
+                  !imex1(k) = d_cons_dt_X(i_mom,k)
+                  !imex2(k) = area(k)*Ptot
                   d_cons_dt_X(i_mom,k) = d_cons_dt_X(i_mom,k) + area(k)*Ptot
+                  !imex3(k) = d_cons_dt_X(i_mom,k)
                else ! -dP/dr as source term
                end if
             else if (k == 1) then
@@ -965,7 +1195,10 @@
                   d_cons_dt_X(j,k) = area(k+1)*flux_face(j,k+1)
                end do
                if (include_P_in_momentum_flux) then
+                  !imex1(k) = d_cons_dt_X(i_mom,k)
+                  !imex2(k) = - area(k+1)*Ptot
                   d_cons_dt_X(i_mom,k) = d_cons_dt_X(i_mom,k) - area(k+1)*Ptot
+                  !imex3(k) = d_cons_dt_X(i_mom,k)
                else ! -dP/dr as source term
                end if
             else
@@ -973,13 +1206,17 @@
                   d_cons_dt_X(j,k) = area(k+1)*flux_face(j,k+1) - area(k)*flux_face(j,k)
                end do
                if (include_P_in_momentum_flux) then
+                  !imex1(k) = d_cons_dt_X(i_mom,k)
+                  !imex2(k) = (area(k) - area(k+1))*Ptot
                   d_cons_dt_X(i_mom,k) = d_cons_dt_X(i_mom,k) + &
                      (area(k) - area(k+1))*Ptot ! geometry source term
+                  !imex3(k) = d_cons_dt_X(i_mom,k)
                else ! -dP/dr as source term
                   d_cons_dt_X(i_mom,k) = d_cons_dt_X(i_mom,k) + &
                      dVol(k)*(P_face(k+1) - P_face(k))/dr(k)
                end if
-            end if            
+            end if     
+               
          end subroutine get1_d_cons_dt_X
          
       end subroutine get_d_cons_dt_X
@@ -1045,7 +1282,7 @@
       
       subroutine initialize_static_problem()
          integer :: k
-         real(dp) :: R_max, deltaR, r00, rp1, T_init
+         real(dp) :: R_max, deltaR, r00, rp1, T_init, mom_seed
          include 'formats'         
          allocate(r_init(nz), rho_init(nz), mom_init(nz), etot_init(nz))         
          ! grid points equally spaced in r
@@ -1053,11 +1290,12 @@
          deltaR = (R_max - R_inner)/nz
          rp1 = R_inner
          T_init = 1d0
+         mom_seed = 2d-9 ! bigger than this goes unstable for 2nd order
          do k=nz,1,-1
             r00 = rp1 + deltaR
             r_init(k) = r00
             rho_init(k) = 1d0
-            mom_init(k) = 0d0
+            mom_init(k) = mom_seed*2d0*(rand() - 0.5d0)
             etot_init(k) = get_etot(rho_init(k), mom_init(k), T_init)
             rp1 = r00
          end do         
@@ -1095,13 +1333,8 @@
             mom_init(k) = 0d0
             rp1 = r00
          end do         
+         write(*,*) 'initialize_smooth_problem'
       end subroutine initialize_smooth_problem
-
-
-
-
-
-
 
 
       
@@ -1109,25 +1342,56 @@
          ! Nonlinear thermal conduction from a point source
          ! hydrodynamic motion disabled
          integer :: k
-         real(dp) :: R_max, deltaR, rp1, r00, E0, dV1
+         real(dp) :: R_max, deltaR, rp1, r00, E0, dV0, rho_ambient, T_ambient, Etot_ambient
          include 'formats'
          allocate(r_init(nz), rho_init(nz), mom_init(nz), etot_init(nz))
          ! grid points equally spaced in r
          R_max = 1d0
          deltaR = (R_max - R_inner)/nz
          rp1 = R_inner
+         rho_ambient = 1d0
+         T_ambient = 1d-4
+         Etot_ambient = get_egas(rho_ambient, T_ambient)
          do k=nz,1,-1
             r00 = rp1 + deltaR
             r_init(k) = r00
-            rho_init(k) = 1d0
-            etot_init(k) = 0d0
+            rho_init(k) = rho_ambient
+            etot_init(k) = Etot_ambient
             mom_init(k) = 0d0
             rp1 = r00
          end do
          E0 = 10d0
-         dV1 = 4d0*pi/3d0*(pow3(r_init(1)) - pow3(R_inner))
-         etot_init(nz) = E0/dV1      
+         dV0 = 4d0*pi/3d0*(pow3(r_init(nz)) - pow3(R_inner))
+         etot_init(nz) = E0/dV0 
+         write(*,*) 'initialize_Barenblatt_problem'
       end subroutine initialize_Barenblatt_problem
+
+
+      subroutine finish_static_problem()
+         write(*,*) 'finish_static_problem'
+      end subroutine finish_static_problem
+
+
+      subroutine finish_Barenblatt_problem()
+         use imex_work
+         use imex_output
+         integer :: k
+         include 'formats'
+         write(*,*) 'finish_Barenblatt_problem'
+         do k=1,nz
+            if (L(k) > 0d0) then
+               write(*,2) 'r for outermost L /= 0', k, r(k)
+               exit
+            end if
+         end do
+         write(*,2) 'T(nz)', nz, T(nz)
+         write(*,2) 'model number, dt', model_number, dt
+      end subroutine finish_Barenblatt_problem
+
+
+      subroutine finish_smooth_problem()
+         write(*,*) 'finish_smooth_problem'
+      end subroutine finish_smooth_problem
 
 
    end module imex

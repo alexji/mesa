@@ -2,17 +2,30 @@
    ! 2001 bates et al "Smooth problem test"
    ! no shocks by time_end
 
-   problem_number = 2
+   problem_number = 1
 
-   nz = 100
+   nz = 50
    time_end = 0.01d0
-   initial_dt = 1d-10  
-                   
-   ! TESTING
-   !TC0 = 0d0
-   !stage1_only = .true.
-   !include_P_in_momentum_flux = .false.         
+   initial_dt = 1d-20  
    
-   stage1_only = .true. ! debugging         
+   CFL = 0.1
+   CFL_front = 0.1
+   
+   cgas = -1 ! will be set to cgas/(gamma-1)
+   crad = -1 ! will be set to 4*boltz_sig/clight
+   
+   Lsurf_factor = 0d0
+   
+   TC0 = 1d5
+   use_HLLC = .false.
+   include_P_in_momentum_flux = .false.
+   low_energy_density_regime = .true.
+   
+   !use_T_prev_for_L = .true.
+   
+   stage1_only = .true.
+   
+   nsteps_per_call = 1000
+   
    
 /
