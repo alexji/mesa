@@ -6,6 +6,7 @@
          r_init, rho_init, mom_init, etot_init ! (nz)         
    end module imex_input 
  
+ 
    module imex_work
       use const_def, only: dp
       integer :: model_number, newton_iter, gmres_mr, &
@@ -17,13 +18,14 @@
          sub, diag, sup, bp, vp, xp, &
          r, area, Vol, dr, dr_bar, dVol, & 
          rhs, deltaT, P_face, L_start, &
-         T_start, T_1, d_ETOT_dt_implicit, d_ETOT_dt_implicit2, &
+         T_start, d_ETOT_dt_implicit, &
          imex1, imex2, imex3, imex4, imex5, imex6, &
-         gmr_r, gmr_cs, gmr_g, gmr_sn, gmr_y, gmr_z, gmr_p ! gmres
+         gmr_r, gmr_cs, gmr_g, gmr_sn, gmr_y, gmr_p ! gmres
       real(dp), dimension(:,:), allocatable :: &
-         prim_start, prim_1, grad_cell, flux_face, &
+         prim_start, grad_cell, flux_face, &
          gmr_v, gmr_h ! gmres
    end module imex_work
+
 
    module imex_plot_data ! only set by call set_imex_plot_data
       use const_def, only: dp
@@ -31,6 +33,7 @@
          plot_r, plot_L, plot_rho, plot_T, plot_v, plot_csound, &
          plot_etot, plot_ekin, plot_eeos, plot_Peos
    end module imex_plot_data
+
 
    module imex_output
       use const_def, only: dp
@@ -42,10 +45,15 @@
    module imex
       use imex_input
 
-      ! bates, knoll, rider, lowrie, mousseau,
+      ! bates, knoll, rider, lowrie, mousseau
       ! On Consistent Time-Integration Methods for Radiation Hydrodynamics in
       ! the Equilibrium Diffusion Limit: Low-Energy-Density Regime
       ! Journal of Computational Physics 167, 99–130 (2001)
+      
+      ! kadioglu, knoll
+      ! A fully second order implicit/explicit time integration technique
+      ! for hydrodynamics plus nonlinear heat conduction problems
+      ! Journal of Computational Physics 229 (2010) 3237–3249
 
       use const_def, only: dp, qp, clight, pi
       use math_lib
@@ -59,9 +67,6 @@
          
          
       contains
-      
-      
-!!! top level control   
    
       
       subroutine start_imex(total_energy_initial, ierr)
@@ -71,14 +76,10 @@
          integer, intent(out) :: ierr
          include 'formats'
          ierr = 0
-         !call test_MGMRES(); stop 'done'
          write(*,*) 'start_imex'
          if (crad < 0d0) crad = 7.5657332502799993d-15 ! crad in mesa
          if (cgas < 0d0) cgas = 8.314462618d7 ! cgas in mesa
          Cv = cgas/(gamma - 1d0)
-         !write(*,1) 'cgas', cgas
-         !write(*,1) 'gamma', gamma
-         !write(*,1) 'Cv', Cv
          select case(problem_number)
          case (0)
             call initialize_static_problem()
@@ -101,7 +102,6 @@
          call set_grid_vars()
          call set_init_prim_and_T()
          total_energy_initial = dot_product(prim(i_etot,1:nz),dVol(1:nz))
-         !stop 'start_imex'
                   
          contains
          
@@ -138,13 +138,12 @@
                r(nz), area(nz), Vol(nz), dr(nz), dr_bar(nz), dVol(nz), & 
                rhs(nz), sub(nz), diag(nz), sup(nz), deltaT(nz), &
                bp(nz), vp(nz), xp(nz), P_face(nz), L_start(nz), &
-               T_start(nz), T_1(nz), T(nz), L(nz), v_face(nz), csound(nz), &
-               d_ETOT_dt_implicit(nz), d_ETOT_dt_implicit2(nz), &
-               prim_start(nvar,nz), prim_1(nvar,nz), prim(nvar,nz), &
+               T_start(nz), T(nz), L(nz), v_face(nz), csound(nz), &
+               d_ETOT_dt_implicit(nz), prim_start(nvar,nz), prim(nvar,nz), &
                imex1(nz), imex2(nz), imex3(nz), imex4(nz), imex5(nz), imex6(nz), &
                grad_cell(nvar,nz), flux_face(nvar,nz), &
                gmr_r(neq), gmr_cs(mr), gmr_sn(mr), gmr_g(mr+1), gmr_p(neq), &
-               gmr_y(mr+1), gmr_z(neq), gmr_v(neq,mr+1), gmr_h(mr+1,mr))
+               gmr_y(mr+1), gmr_v(neq,mr+1), gmr_h(mr+1,mr))
          end subroutine alloc_work_arrays
 
          subroutine alloc_imex_plot_data_arrays()
@@ -262,8 +261,7 @@
             call save_start_values ! T_start, prim_start
             final_step = do_step( &
                T_start, prim_start, & ! input
-               T_1, prim_1, grad_cell, flux_face, & ! work
-               d_ETOT_dt_implicit, d_ETOT_dt_implicit2, & ! work
+               grad_cell, flux_face, d_ETOT_dt_implicit, & ! work
                T, prim, L, v_face, & ! output
                ierr)
             if (ierr /= 0 .or. final_step) exit
@@ -308,23 +306,20 @@
       
       
       logical function do_step( & 
-         ! doesn't assume or enforce exact consistency between T and prim
             T_0, prim_0, & ! input
-            T_1, prim_1, grad_cell, flux_face, & ! work
-            d_ETOT_dt_implicit, d_ETOT_dt_implicit2, & ! work
-            T_2, prim_2, L, v_face, & ! output
+            grad_cell, flux_face, d_ETOT_dt_implicit, & ! work
+            T, prim, L, v_face, & ! output
             ierr) result(final_step)
          use imex_work, only: &
             time, dt, dt_next, newton_iter, model_number
          real(dp), intent(in), dimension(:) :: T_0 ! input
          real(dp), intent(in), dimension(:,:) ::  prim_0 ! input
-         real(dp), intent(out), dimension(:) :: & ! work
-            T_1, d_ETOT_dt_implicit,  d_ETOT_dt_implicit2
-         real(dp), intent(out), dimension(:,:) :: & ! work
-            prim_1, grad_cell, flux_face
-         real(dp), intent(out), dimension(:) :: T_2, L, v_face ! output
-         real(dp), intent(out), dimension(:,:) :: prim_2 ! output
+         real(dp), intent(out), dimension(:) :: d_ETOT_dt_implicit
+         real(dp), intent(out), dimension(:,:) :: grad_cell, flux_face
+         real(dp), intent(out), dimension(:) :: T, L, v_face ! output
+         real(dp), intent(out), dimension(:,:) :: prim ! output
          integer, intent(out) :: ierr
+         integer :: k, j
          include 'formats'
          ierr = 0
          newton_iter = 0
@@ -337,18 +332,26 @@
          end if
          final_step = (time + dt >= time_end)
          if (final_step) dt = time_end - time
-         call stage1( &
-            T_0, prim_0, & ! input
-            grad_cell, flux_face, & ! work
-            d_ETOT_dt_implicit, & ! output
-            T_2, prim_2, L, v_face, & ! output
-            ierr)
+         ! bates 2001 setup with explicit followed by implicit
+         if (thermal_diffusion_only) then
+            ! no explicit
+         else
+            call calc_explicit( &
+               T_0, prim_0, grad_cell, flux_face, prim, v_face, ierr)
+            if (ierr /= 0) then
+               write(*,2) 'do_step calc_explicit failed', model_number
+               return
+            end if
+         end if
+         call calc_implicit( &
+            T_0, prim_0, grad_cell, flux_face, d_ETOT_dt_implicit, &
+            prim, v_face, T, L, ierr)
          if (ierr /= 0) then
-            write(*,2) 'stage1 failed', model_number
+            write(*,2) 'do_step calc_implicit failed', model_number
             return
          end if
          time = time + dt
-         dt_next = pick_next_timestep(T_2, prim_2, T_0, prim_0)
+         dt_next = pick_next_timestep(T, prim, T_0, prim_0)
          !write(*,1) 'dt_next', dt_next
       end function do_step
       
@@ -361,54 +364,18 @@
             L_start(k) = L(k)
          end do
       end subroutine save_start_values
-      
-      
-      subroutine stage1( &
-            T_0, prim_0, & ! input
-            grad_cell, flux_face, & ! work
-            d_ETOT_dt_implicit, & ! output
-            T_1, prim_1, L_1, v_face_1, & ! output
-            ierr)
-         use imex_work, only: dt, dVol, model_number
-         real(dp), intent(in), dimension(:) :: T_0
-         real(dp), intent(in), dimension(:,:) ::  prim_0
-         real(dp), intent(out), dimension(:) :: &
-            d_ETOT_dt_implicit, T_1, L_1, v_face_1
-         real(dp), intent(out), dimension(:,:) :: &
-            grad_cell, flux_face, prim_1
-         integer, intent(out) :: ierr
-         integer :: k, j
-         include 'formats'
-         ierr = 0
-         if (thermal_diffusion_only) then
-         else
-            call calc_explicit( &
-               T_0, prim_0, grad_cell, flux_face, prim_1, v_face_1, ierr)
-            if (ierr /= 0) then
-               write(*,2) 'stage1 calc_explicit failed', model_number
-               return
-            end if
-         end if
-         call calc_implicit( &
-            T_0, prim_0, grad_cell, flux_face, d_ETOT_dt_implicit, &
-            prim_1, v_face_1, T_1, L_1, ierr)
-         if (ierr /= 0) then
-            write(*,2) 'stage1 calc_implicit failed', model_number
-            return
-         end if
-      end subroutine stage1
             
       
-      real(dp) function pick_next_timestep(T_2, prim_2, T_0, prim_0)
+      real(dp) function pick_next_timestep(T, prim, T_0, prim_0)
          use imex_work, only: dt, &
             dt_advection, dt_grid, dt_rel_dE, dt_max_new, dt_front_v
-         real(dp), intent(in), dimension(:) :: T_2, T_0
-         real(dp), intent(in), dimension(:,:) ::  prim_2, prim_0
+         real(dp), intent(in), dimension(:) :: T, T_0
+         real(dp), intent(in), dimension(:,:) ::  prim, prim_0
          include 'formats'
-         dt_advection = get_min_dt_advection(T_2, prim_2)
+         dt_advection = get_min_dt_advection(T, prim)
          dt_grid = get_min_dt_grid()
-         dt_rel_dE = get_dt_rel_dE(prim_0, prim_2)
-         dt_front_v = get_dt_front_v(prim_0, prim_2)
+         dt_rel_dE = get_dt_rel_dE(prim_0, prim)
+         dt_front_v = get_dt_front_v(prim_0, prim)
          dt_max_new = dt*max_timestep_factor
          pick_next_timestep = &
             min(dt_advection, dt_rel_dE, dt_grid, dt_max_new, dt_front_v)
@@ -434,7 +401,6 @@
          else
             dt_rel_dE = dt*sqrt(limit_dE_div_E/max_dE_div_E)
          end if
-         !write(*,2) 'get_dt_rel_dE', model_number, dt_rel_dE, limit_dE_div_E
       end function get_dt_rel_dE
       
       
@@ -459,7 +425,6 @@
          else
             dt_front_v = CFL_front*sum_dE/sum_dE_dt
          end if
-         !write(*,2) 'dt_front_v sum_dE_dt sum_dE', model_number, dt_front_v, sum_dE_dt, sum_dE
       end function get_dt_front_v
       
       
@@ -519,6 +484,7 @@
                   prim(j,k) = prim_0(j,k)
                end do
             end do
+         ! else prim set by explicit
          end if
          converged = .false.
          do newton_iter = 1, newton_iter_max
@@ -580,16 +546,12 @@
          end do
          !$OMP END PARALLEL DO    
          
-         
-         if (use_JFNK) then ! test GMRES 
-            ! put initial guess in deltaT
-            deltaT(1:nz) = 0d0 ! for now
-            call solve_matrix_equation_with_GMRES(T, deltaT, ierr) ! updates T
+         if (use_JFNK) then
+            deltaT(1:nz) = 0d0
+            call solve_matrix_equation_with_GMRES(T, deltaT, ierr)
          else
-            call solve_matrix_equation(ierr) ! updates T
+            call solve_matrix_equation(ierr)
          end if
-         
-         
          
          contains
          
@@ -736,7 +698,7 @@
       subroutine solve_matrix_equation_with_GMRES(T, deltaT, ierr)
          ! tridiagonal equation info in rhs, sub, diag, sup
          use imex_work, only: newton_iter, model_number, rhs, diag, &
-            gmres_mr, gmr_p, gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y, gmr_z
+            gmres_mr, gmr_p, gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y
          real(dp), dimension(:), intent(inout) :: T, deltaT 
          integer, intent(out) :: ierr
          integer :: k, neq, itr_max
@@ -746,28 +708,23 @@
          itr_max = 20
          tol_abs = 1.0D-08
          tol_rel = 1.0D-08
-         neq = nz ! only 1 variable per zone
+         neq = nz ! only 1 variable per zone for this problem
          do k=1,nz
             gmr_p(k) = 1d0/diag(k)
-            if (is_bad(gmr_p(k))) then
-               write(*,2) 'gmr_p(k)', k, gmr_p(k)
-               stop 'solve_matrix_equation_with_GMRES'
-            end if
          end do
          call mgmres( &
             neq, matvec, psolve, deltaT, rhs, itr_max, gmres_mr, tol_abs, tol_rel, &
-            gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y, gmr_z)
+            gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y)
          do k=1,nz
             T(k) = T(k) + deltaT(k)
          end do            
-         !write(*,2) 'T', nz, T(nz)
          
          contains
    
-         subroutine psolve(x) ! set x = Precond*x
+         subroutine psolve(x) ! set x = gmr_p*x
             real(dp), intent(inout) :: x(:) ! (neq)
             integer :: k
-            !return
+            !$omp simd
             do k=1,nz
                x(k) = gmr_p(k)*x(k)
             end do
@@ -779,6 +736,7 @@
             real(dp), intent(out) :: r(:) ! (neq)
             integer :: k
             total_gmres_matvecs = total_gmres_matvecs + 1
+            !$omp simd
             do k=2,nz-1
                r(k) = sub(k-1)*x(k-1) + diag(k)*x(k) + sup(k)*x(k+1)
             end do
@@ -1508,7 +1466,7 @@
       
       subroutine mgmres ( &
             n, matvec, psolve, x, rhs, itr_max, mr, tol_abs, tol_rel, &
-            r, v, c, g, h, s, y, z )
+            r, v, c, g, h, s, y )
          integer, intent(in) :: n
          interface
             subroutine matvec(x, r) ! set r = A*x
@@ -1523,7 +1481,7 @@
          end interface
          real(dp), intent(inout) :: x(:) ! (n)   initial guess on input, result on output
          real(dp), intent(in) :: rhs(:) ! (n)
-         real(dp), intent(out), dimension(:) :: r, c, g, s, y, z
+         real(dp), intent(out), dimension(:) :: r, c, g, s, y
          real(dp), intent(out), dimension(:,:) :: v, h
          integer, intent(in) :: itr_max, mr
          real(dp), intent(in) :: tol_abs, tol_rel
@@ -1540,9 +1498,12 @@
             write ( *, '(a,i8)' ) '  MR = ', mr
             stop
          end if
-         do itr = 1, itr_max ! restart loop
+         do itr = 1, itr_max ! loop back to here for restarts
             call matvec ( x, r )
-            r(1:n) = rhs(1:n) - r(1:n)
+            !$omp simd
+            do j=1,n
+               r(j) = rhs(j) - r(j)
+            end do
             call psolve ( r ) ! apply pcond to residual
             rho = sqrt ( dot_product ( r(1:n), r(1:n) ) )
             if ( verbose ) &
@@ -1550,7 +1511,10 @@
             if (is_bad(rho)) stop 'bad residual'
             if ( itr == 1 ) rho_tol = rho * tol_rel
             if ( rho <= rho_tol .and. rho <= tol_abs ) exit
-            v(1:n,1) = r(1:n) / rho
+            !$omp simd
+            do j=1,n
+               v(j,1) = r(j) / rho
+            end do
             g(1) = rho
             g(2:mr+1) = 0.0D+00
             h(1:mr+1,1:mr) = 0.0D+00
@@ -1562,25 +1526,41 @@
                av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
                do j = 1, k
                   h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
-                  v(1:n,k+1) = v(1:n,k+1) - h(j,k) * v(1:n,j)
+                  !$omp simd
+                  do i=1,n
+                     v(i,k+1) = v(i,k+1) - h(j,k) * v(i,j)
+                  end do
                end do
                h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
                if ( av + delta * h(k+1,k) == av ) then
                   do j = 1, k
                      htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
                      h(j,k) = h(j,k) + htmp
-                     v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
+                     !$omp simd
+                     do i=1,n
+                        v(i,k+1) = v(i,k+1) - htmp * v(i,j)
+                     end do
                   end do
                   h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
                end if
-               if ( h(k+1,k) /= 0.0D+00 ) &
-                  v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
+               if ( h(k+1,k) /= 0.0D+00 ) then
+                  !$omp simd
+                  do i=1,n
+                     v(i,k+1) = v(i,k+1) / h(k+1,k)
+                  end do
+               end if
                if ( 1 < k ) then
-                  y(1:k+1) = h(1:k+1,k)
+                  !$omp simd
+                  do i=1,k+1
+                     y(i) = h(i,k)
+                  end do
                   do j = 1, k - 1
                      call mult_givens ( c(j), s(j), j, y(1:k+1) )
                   end do
-                  h(1:k+1,k) = y(1:k+1)
+                  !$omp simd
+                  do i=1,k+1
+                     h(i,k) = y(i)
+                  end do
                end if
                mu = sqrt ( pow2(h(k,k)) + pow2(h(k+1,k)) )
                c(k) = h(k,k) / mu
@@ -1616,7 +1596,7 @@
          contains
          
          subroutine mult_givens ( c, s, k, g )
-            real(dp), intent(in) :: c, s
+            real(dp), intent(in) :: c, s ! cos and sin
             integer, intent(in) :: k
             real(dp), intent(inout) :: g(:) ! (1:k+1)
             real(dp) :: g1, g2
@@ -1782,7 +1762,6 @@
         real(dp) :: h(1:mr+1,1:mr)
         real(dp) :: s(1:mr)
         real(dp) :: y(1:mr+1)
-        real(dp) :: z(1:n)
         real(dp), dimension(n) :: x_exact = (/ &
           3.5D+00, &
           1.0D+00, &
@@ -1829,7 +1808,7 @@
 
           call mgmres ( &
              n, ax, psolve, x_estimate, rhs, itr_max, mr, tol_abs, tol_rel, &
-             r, v, c, g, h, s, y, z )
+             r, v, c, g, h, s, y )
 
           x_error = sqrt ( sum ( pow2( x_exact(1:n) - x_estimate(1:n) ) ) )
 

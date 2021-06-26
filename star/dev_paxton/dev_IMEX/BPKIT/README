@@ -1,0 +1,134 @@
+                  BPKIT 2.0 Block Preconditioner Toolkit
+                    Authors:  E. Chow and M. A. Heroux
+      Copyright (c) 1995-1996  The Regents of the University of Minnesota
+
+This library is free software; you can redistribute it and/or
+modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either
+version 2.1 of the License, or (at your option) any later version.
+
+This library is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this library; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+
+This version dated Dec 07 2006
+
+--------------------------------------------------------------------------------
+                  BPKIT 2.0 Block Preconditioner Toolkit
+--------------------------------------------------------------------------------
+
+                               INTRODUCTION
+
+BPKIT is a toolkit of block preconditioners for the iterative solution of
+linear systems.  The most effective general purpose and black-box type of
+preconditioners are available, including block SSOR, block tridiagonal ILU,
+and the block extension of point ILU with level-of-fill.  Any of these
+"global" preconditioners may be coupled with one of a large collection of
+"local" preconditioners for approximately or exactly inverting or solving
+with the diagonal or pivot blocks.  These include a number of approximate
+inverse techniques.  By combining a global and local preconditioner, a wide
+variety of preconditionings are possible, matched to the difficulty and
+structure of the problem.  For example, the following popular methods are
+possible:
+
+
+   Block SSOR, using level-of-fill or threshold-based ILU to solve with
+   the diagonal blocks
+
+   A block version of level-based ILU using "exact" inverses for the 
+   pivot blocks
+
+   ILU on a block tridiagonal system, using an approximate inverse technique
+   suitable for the structure of the pivot blocks
+
+   Matrices with no block structure may be treated as a single block,
+   and a single local preconditioner may be used.
+
+The blocks may be stored in dense or sparse formats, and user-defined data
+structures may also be used.  Variable block sizes are allowed within a
+matrix.  Operations with the blocks call the BLAS, LAPACK, or the sparse
+BLAS, for efficiency across many platforms.  The selection of larger blocks
+usually gives higher performance.  BPKIT supports the preconditioning of a
+block of vectors, to enhance efficiency when block iterative methods are
+used.  A flexible GMRES iterative method is provided in BPKIT for users
+who do not have an iterative method readily available.  A test program
+reads any linear system in Harwell-Boeing format and solves it using
+any combination of preconditioners and parameters specified by the user.
+This is important in the "experimentation" stage when trying to solve
+problems from new applications.  BPKIT is written in C++ and FORTRAN.
+BPKIT is not parallel; for parallel applications BPKIT is suitable for the 
+local solvers used in each subdomain.
+
+
+BPKIT is extensible.  Local and global preconditioners may be added.
+A few lines of C++ must be written in order to make the new "objects"
+polymorphic with the others (i.e., may be treated like other local and
+global preconditioners).  User-defined data structures for the blocks
+and block matrices can also be added.
+
+
+The source code for BPKIT is freely provided.
+The software is provided "as-is" without express or implied warranty.
+The authors, contributors, and their institutions are not liable for
+any loss, damage, or inconvenience caused by the use of this software.
+
+
+Versions
+--------
+
+BPKIT was created in 1995-1996.  The 2006 version is a small update to
+match the current C++ standard.
+
+
+References
+----------
+
+Edmond Chow and Michael A. Heroux, An object-oriented framework for
+block preconditioning, Trans. Math. Softw., 24 (1998), pp. 159-183.
+
+Edmond Chow and Michael A. Heroux, BPKIT Reference Manual, University
+of Minnesota Supercomputing Institute Technical Report UMSI 96/183,
+September 1996.
+
+
+Release Notes
+-------------
+
+There are some additional resources not documented in the manual pages:
+HBTMat.scale (scale the HBT matrix), 
+APINVS.print (print debugging info),
+ILUT.permtol (pivot tolerance for partial pivoting), 
+ILUT.pblock (block size to use for pivoting), 
+ILUT.stat (print ILUT statistics), 
+BILUK.print (print debugging info).
+
+
+Contact
+-------
+BPKIT was created by Edmond Chow (etchow->gmail.com) and
+Mike Heroux (maherou->sandia.gov).
+
+--------------------------------------------------------------------------------
+
+                        INSTALLATION INSTRUCTIONS
+
+You should have the following directories under the BPKIT main directory:
+
+                            src   app   doc
+
+The doc directory contains the manual pages and a technical paper describing
+BPKIT.  The src directory contains the source files; use the makefile to
+make the BPKIT library; minor changes may need to be made to the makefile
+to suit your environment.  The app directory contains source files for 
+application programs.  Please see its README file.  The makefile in the app
+directory is used for making these programs.  Changes need to be made to 
+the makefile to suit your environment, particularly the selection of the 
+location of the FORTRAN standard libraries (if you are using the FORTRAN 
+interface).  Note that the C++ compiler is used for linking.
+
+--------------------------------------------------------------------------------

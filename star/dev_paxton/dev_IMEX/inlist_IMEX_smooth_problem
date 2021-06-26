@@ -22,7 +22,6 @@
    
    Lsurf_factor = 0.5d0
    
-   !stage1_only = .true.     
    !time_centering = .true.
    !use_T_prev_for_L = .true.  
    !piecewise_constant_reconstruction = .true.

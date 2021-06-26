@@ -2,32 +2,31 @@
    ! 2001 bates et al "Barenblatt test"
    ! Nonlinear thermal conduction from a point source
    ! hydrodynamic motion disabled
+
    problem_number = 1
-   
    nz = 200
    
    initial_dt = 1d-28  ! for TCb = 2.5d0
    time_end = 0.3d0
 
-   initial_dt = 1d-54  ! for TCb = 6.5d0
-   time_end = 1.d0
+   !initial_dt = 1d-54  ! for TCb = 6.5d0
+   !time_end = 1.d0
    
 ! timesteps
    CFL = 1d99 ! not used
    max_timestep_factor = 2d0
 
-   CFL_front = 0.1d0
+   CFL_front = 0.5d0
    
-   !stage1_only = .true.     
-   !time_centering = .true.
+   time_centering = .true.
    !use_T_prev_for_L = .true.
 
 
 
    TC0 = 1d0
    TCa = 0d0
-   !TCb = 2.5d0
-   TCb = 6.5d0
+   TCb = 2.5d0
+   !TCb = 6.5d0
    
    cgas = 1d0
    crad = 0d0
@@ -41,8 +40,11 @@
    tol_resid_max = 1d-7
    newton_iter_max = 50
    
+   
+   use_JFNK = .true. ! test GMRES
+   
 
-   nsteps_per_call = 5000
+   nsteps_per_call = 500000
    
 /
 
@@ -50,36 +52,20 @@
    
    initial_dt = 1d-28  ! for TCb = 2.5d0
    time_end = 0.3d0
-
-   CFL_front = 0.1d0
+   CFL_front = 0.5d0
    TCb = 2.5d0
    
-   stage1_only = .true.       
    time_centering = .true.
-   use_T_prev_for_L = .true.
-                                 r for outermost L /= 0          14    9.3500000000000072D-01
-                                                  T(nz)         200    1.1749857518689286D+00
-                                       model number, dt      640302    9.3405674750357548D-08
-   !stage1_only = .true.       
-   !time_centering = .true.
    !use_T_prev_for_L = .true.
+
+ start_imex
+ initialize_Barenblatt_problem
+ finish_Barenblatt_problem
                                  r for outermost L /= 0          14    9.3500000000000072D-01
-                                                  T(nz)         200    1.1749910748405992D+00
-                                       model number, dt      640276    1.5380627237382427D-06
+                                                  T(nz)         200    1.1749822021570342D+00
+                                       model number, dt      129329    4.1919023762715391D-06
+ done
+ finish_imex
 
+runtime (minutes), steps newton_iters gmres_matvecs         0.37        129329        261805       1907756
 
-   agrees by-eye with bates Fig 3
-
-   initial_dt = 1d-54  ! for TCb = 6.5d0
-   time_end = 1.d0
-
-   CFL_front = 0.1d0
-   TCb = 6.5d0
-   initial_dt = 1d-54  ! for TCb = 6.5d0
-   
-   !stage1_only = .true.       
-   !time_centering = .true.
-   !use_T_prev_for_L = .true.
-                                 r for outermost L /= 0          15    9.3000000000000071D-01
-                                                  T(nz)         200    9.0602883504295184D-01
-                                       model number, dt     1729990    6.0657442533251782D-06

@@ -29,7 +29,9 @@
       implicit none
 
       private
-      public :: bcyclic_factor, bcyclic_solve, clear_storage
+      public :: bcyclic_factor, bcyclic_solve, clear_storage, &
+         my_getf2_n4, my_getf2_n5, my_getf2, &
+         my_getrs1_n4, my_getrs1_n5, my_getrs1, my_gemv_p1
 
       logical, parameter :: dbg = .false.
       logical, parameter :: do_set_nan = .false.

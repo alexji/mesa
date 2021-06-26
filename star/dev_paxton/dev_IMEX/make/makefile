@@ -27,8 +27,10 @@ IMEX_OBJS = imex.o
 
 OBJS = $(IMEX_OBJS) $(STAR_WORK_OBJS) run.o
 
+BPLIB = $(WORK_DIR)/BPKIT/src/libbpkit.a
+
 $(STAR) : $(OBJS)
-	$(LOADER) $(FCopenmp) -o $(WORK_DIR)/$(STAR) $(OBJS) $(LOAD_MESA)
+	$(LOADER) $(FCopenmp) -o $(WORK_DIR)/$(STAR) $(OBJS) $(BPLIB) $(LOAD_MESA)
 
 #################################################################
 

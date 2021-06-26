@@ -5,7 +5,7 @@
             newton_iter_max, nsteps_per_call, max_calls, &
             model_number_for_nsteps_per_call2, nsteps_per_call2
          logical :: &
-            include_P_in_momentum_flux, stage1_only, use_JFNK, &
+            include_P_in_momentum_flux, use_JFNK, &
             use_HLLC, use_T_prev_for_L, thermal_diffusion_only, &
             low_energy_density_regime, time_centering, &
             piecewise_constant_reconstruction
@@ -20,7 +20,7 @@
             problem_number, nz, initial_model_number, &
             newton_iter_max, nsteps_per_call, max_calls, &
             model_number_for_nsteps_per_call2, nsteps_per_call2, &
-            include_P_in_momentum_flux, stage1_only, use_JFNK, &
+            include_P_in_momentum_flux, use_JFNK, &
             use_HLLC, use_T_prev_for_L, thermal_diffusion_only, &
             low_energy_density_regime, time_centering, &
             piecewise_constant_reconstruction, &

@@ -43,7 +43,6 @@
    tol_resid_norm = 1d-8
    tol_resid_max = 1d-6
    newton_iter_max = 50
-   stage1_only = .false.
    use_HLLC = .true.
    use_JFNK = .false.
    use_T_prev_for_L = .false.

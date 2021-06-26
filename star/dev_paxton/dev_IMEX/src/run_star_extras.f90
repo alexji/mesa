@@ -304,8 +304,10 @@
          if (ierr /= 0) stop 'finish_imex error'
          call system_clock(time1,clock_rate)
          runtime = real(time1 - time0, dp) / clock_rate / 60
-         write(*,'(/,a,f12.2,99i14/)') 'runtime (minutes), steps newton_iters gmres_matvecs ', &
-              runtime, s% model_number, total_newton_iters, total_gmres_matvecs
+         write(*,'(/,a,f12.2,3i14,f12.2/)') &
+            'runtime (minutes), steps newton_iters gmres_matvecs matvecs/iter', &
+              runtime, s% model_number, total_newton_iters, total_gmres_matvecs, &
+              dble(total_gmres_matvecs)/total_newton_iters
          ierr = -1 ! to terminate the star run         
       end subroutine do_imex
 
