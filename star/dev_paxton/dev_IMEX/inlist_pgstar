@@ -1,8 +1,8 @@
 &pgstar
 
-   pgstar_xaxis_label_scale = 0.9
-   pgstar_left_yaxis_label_scale = 0.9
-   pgstar_right_yaxis_label_scale = 0.9
+   pgstar_xaxis_label_scale = 1.2 ! 0.9
+   pgstar_left_yaxis_label_scale = 1.2 ! 0.9
+   pgstar_right_yaxis_label_scale = 1.2 ! 0.9
 
    pgstar_xaxis_label_disp = 2.5
    pgstar_left_yaxis_label_disp = 4.2 ! 3.4
@@ -137,67 +137,68 @@
 
 
 Profile_Panels2_win_flag = .false.
-   Profile_Panels2_xaxis_name = 'zone' !  'radius_cm' ! 
-   !Profile_Panels2_xaxis_reversed = .false. ! radius
-   Profile_Panels2_xaxis_reversed = .true. ! zone
-   Profile_Panels2_xmin = -101
-   Profile_Panels2_xmax = -101
+! see inlist_IMEX for these
+!   Profile_Panels2_xaxis_name = 'zone' !  'radius_cm' ! 
+!   !Profile_Panels2_xaxis_reversed = .false. ! radius
+!   Profile_Panels2_xaxis_reversed = .true. ! zone
+!   Profile_Panels2_xmin = -101
+!   Profile_Panels2_xmax = -101
 
    Profile_Panels2_title = ''         
-   Profile_Panels2_num_panels = 6
+   Profile_Panels2_num_panels = 4
            
-   Profile_Panels2_yaxis_name(1) = 'temperature'          ! 'density'  !
+   Profile_Panels2_yaxis_name(1) = 'plot_etot' 
    Profile_Panels2_ymax(1) = -101D0 ! 1
    Profile_Panels2_ymin(1) = -101D0 ! -1
    Profile_Panels2_dymin(1) = 3d-6
-   
-   Profile_Panels2_other_yaxis_name(1) = 'drho_dt0' ! 'energy'
+
+   Profile_Panels2_other_yaxis_name(1) = 'plot_rho' 
    Profile_Panels2_other_ymax(1) = -101D0 !  2e6 
    Profile_Panels2_other_ymin(1) = -101D0 ! -2e6
    Profile_Panels2_other_dymin(1) = 3d-6
             
-   Profile_Panels2_yaxis_name(2) = 'v' ! 'pressure' ! 'mass_grams'  
+   Profile_Panels2_yaxis_name(2) = 'plot_ekin' 
    Profile_Panels2_ymax(2) = -101D0 ! 3.7  
    Profile_Panels2_ymin(2) = -101D0 ! 3.1 
    Profile_Panels2_dymin(2) = 3d-6
    
-   Profile_Panels2_other_yaxis_name(2) = 'dv_dt0' ! 'density' 
+   Profile_Panels2_other_yaxis_name(2) = 'plot_eeos' 
    Profile_Panels2_other_ymax(2) = -101D0 ! 
    Profile_Panels2_other_ymin(2) = -101D0 ! 
    Profile_Panels2_other_dymin(2) = 3d-6
             
-   Profile_Panels2_yaxis_name(3) = 'energy' ! 'v' 
+   Profile_Panels2_yaxis_name(3) = 'plot_v' 
    Profile_Panels2_ymax(3) = -101D0 ! 3.7  
    Profile_Panels2_ymin(3) = -101D0 ! 3.1 
    Profile_Panels2_dymin(3) = 3d-6
 
-   Profile_Panels2_other_yaxis_name(3) = 'detot_dt0' ! 'v_div_cs'
+   Profile_Panels2_other_yaxis_name(3) = 'plot_L' 
    Profile_Panels2_other_ymax(3) = -101D0 ! 
    Profile_Panels2_other_ymin(3) = -101D0 ! 
    Profile_Panels2_other_dymin(3) = 3d-6
             
-   Profile_Panels2_yaxis_name(4) = 'imex1'     
+   Profile_Panels2_yaxis_name(4) = 'plot_T'     
    Profile_Panels2_ymax(4) = -101D0
    Profile_Panels2_ymin(4) = -101D0
    Profile_Panels2_dymin(4) = 3d-6
    
-   Profile_Panels2_other_yaxis_name(4) = 'imex2' 
+   Profile_Panels2_other_yaxis_name(4) = 'plot_Peos' 
    Profile_Panels2_other_ymax(4) = -101D0 ! 
    Profile_Panels2_other_ymin(4) = -101D0 ! 
    
-   Profile_Panels2_yaxis_name(5) = 'imex3'
+   Profile_Panels2_yaxis_name(5) = ''
    Profile_Panels2_ymax(5) = -101D0
    Profile_Panels2_ymin(5) = -101D0
    Profile_Panels2_dymin(5) = 3d-6
 
-   Profile_Panels2_other_yaxis_name(5) = 'imex4' 
+   Profile_Panels2_other_yaxis_name(5) = '' 
             
-   Profile_Panels2_yaxis_name(6) = 'lum_erg_s'  ! 'alpha_RTI'     
+   Profile_Panels2_yaxis_name(6) = '' 
    Profile_Panels2_ymax(6) = -101D0 ! 
    Profile_Panels2_ymin(6) = -101D0 ! 
    Profile_Panels2_dymin(6) = 3d-6
    
-   Profile_Panels2_other_yaxis_name(6) = 'pressure' 
+   Profile_Panels2_other_yaxis_name(6) = '' 
    Profile_Panels2_other_ymax(6) = -101D0 ! 1d-3
    Profile_Panels2_other_ymin(6) = -101D0 ! -1d-3
    
@@ -230,7 +231,7 @@ Profile_Panels2_win_flag = .false.
    Text_Summary2_name(5,3) = ''
    
    Text_Summary2_name(1,4) = 'num_zones'
-   Text_Summary2_name(2,4) = 'dt_max'
+   Text_Summary2_name(2,4) = 'dt_rel_dE'
    Text_Summary2_name(3,4) = 'sum_ERAD'
    Text_Summary2_name(4,4) = ''
    Text_Summary2_name(5,4) = ''

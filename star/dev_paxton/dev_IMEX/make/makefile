@@ -23,7 +23,9 @@ WORK_DIR = ..
 WORK_SRC_DIR = $(WORK_DIR)/src
 STAR_JOB_DIR = $(MESA_DIR)/star/job
 
-OBJS = imex.o $(STAR_WORK_OBJS) run.o
+IMEX_OBJS = imex.o
+
+OBJS = $(IMEX_OBJS) $(STAR_WORK_OBJS) run.o
 
 $(STAR) : $(OBJS)
 	$(LOADER) $(FCopenmp) -o $(WORK_DIR)/$(STAR) $(OBJS) $(LOAD_MESA)
@@ -48,11 +50,8 @@ run_star_extras.o: $(WORK_SRC_DIR)/run_star_extras.f90
 	$(WORK_COMPILE) -I $(MESA_CONTRIB_DIR)/hooks $<
 endif
 
-imex.o: $(WORK_SRC_DIR)/imex.f90
-	$(WORK_COMPILE) -O3 $<
-	
 %.o: $(WORK_SRC_DIR)/%.f90
-	$(WORK_COMPILE) $<
+	$(WORK_COMPILE) -O3 $<
 
 %.o: $(STAR_JOB_DIR)/%.f90
 	$(WORK_COMPILE) $<

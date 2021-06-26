@@ -17,7 +17,7 @@
    M_inner = 0d0
    L_inner = 0d0
    Lsurf_factor = 0d0 ! no energy loss from surface 
-      ! 0.25d0 or so for "standard" surface luminosity
+      ! 0.5d0 or so for "standard" surface luminosity
 
 ! eos 
    gamma = 5d0/3d0
@@ -36,6 +36,7 @@
    CFL = 0.5d0
    CFL_front = 0.5d0
    max_timestep_factor = 1.5d0
+   limit_dE_div_E = 0.1d0
 
 ! solver
    include_P_in_momentum_flux = .true.
@@ -44,11 +45,15 @@
    newton_iter_max = 50
    stage1_only = .false.
    use_HLLC = .true.
+   use_JFNK = .false.
    use_T_prev_for_L = .false.
    low_energy_density_regime = .false.
    thermal_diffusion_only = .false.
    time_centering = .false.
+   piecewise_constant_reconstruction = .false.
    
 ! run_star_extras do_imex params
-   nsteps_per_call = 1000
-   max_calls = 10000
+   max_calls = 100000
+   nsteps_per_call = 1000 ! determines how often pgstar is called
+   model_number_for_nsteps_per_call2 = 999999999
+   nsteps_per_call2 = 1

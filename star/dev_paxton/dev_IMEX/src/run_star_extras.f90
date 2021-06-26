@@ -131,7 +131,7 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
-         how_many_extra_history_columns = 8
+         how_many_extra_history_columns = 9
       end function how_many_extra_history_columns
       
       
@@ -156,6 +156,7 @@
          names(i) = 'dt_advec'; vals(i) = dt_advection; i=i+1
          names(i) = 'dt_grid'; vals(i) = dt_grid; i=i+1
          names(i) = 'dt_max'; vals(i) = dt_max_new; i=i+1
+         names(i) = 'dt_rel_dE'; vals(i) = dt_rel_dE; i=i+1
          names(i) = 'dt_front'; vals(i) = dt_front_v; i=i+1
          names(i) = 'sum_ETOT'; vals(i) = sum_ETOT; i=i+1
          names(i) = 'sum_EKIN'; vals(i) = sum_EKIN_actual; i=i+1
@@ -173,16 +174,16 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
-         how_many_extra_profile_columns = 12
+         how_many_extra_profile_columns = 16
       end function how_many_extra_profile_columns
       
       
       subroutine data_for_extra_profile_columns(id, n, nz, names, vals, ierr)
          use star_def, only: star_info, maxlen_profile_column_name
          use const_def, only: dp
-         use imex, only: i_rho, i_mom, i_etot, stage1_only
-         use imex_work
-         use imex_output
+         use imex, only: set_imex_plot_data
+         use imex_plot_data
+         use imex_work, only: imex1, imex2, imex3, imex4, imex5, imex6
          integer, intent(in) :: id, n, nz
          character (len=maxlen_profile_column_name) :: names(n)
          real(dp) :: vals(nz,n)
@@ -193,13 +194,18 @@
          ierr = 0
          call star_ptr(id, s, ierr)
          if (ierr /= 0) return
+         call set_imex_plot_data()
          i = 1
-         names(i) = 'drho_dt0'; i=i+1
-         names(i) = 'drho_dt1'; i=i+1
-         names(i) = 'dv_dt0'; i=i+1
-         names(i) = 'dv_dt1'; i=i+1
-         names(i) = 'detot_dt0'; i=i+1
-         names(i) = 'detot_dt1'; i=i+1
+         names(i) = 'plot_r'; i=i+1
+         names(i) = 'plot_L'; i=i+1
+         names(i) = 'plot_rho'; i=i+1
+         names(i) = 'plot_T'; i=i+1
+         names(i) = 'plot_v'; i=i+1
+         names(i) = 'plot_csound'; i=i+1
+         names(i) = 'plot_etot'; i=i+1
+         names(i) = 'plot_ekin'; i=i+1
+         names(i) = 'plot_eeos'; i=i+1
+         names(i) = 'plot_Peos'; i=i+1
          names(i) = 'imex1'; i=i+1
          names(i) = 'imex2'; i=i+1
          names(i) = 'imex3'; i=i+1
@@ -209,21 +215,16 @@
          
          do k=1,nz
             i = 1
-            if (stage1_only) then
-               vals(k,i) = d_cons_dt_X0(i_rho,k)/dVol(k); i=i+1
-               vals(k,i) = 0d0; i=i+1
-               vals(k,i) = d_cons_dt_X0(i_mom,k)/cons(i_rho,k); i=i+1
-               vals(k,i) = 0d0; i=i+1
-               vals(k,i) = d_cons_dt_X0(i_etot,k)/dVol(k); i=i+1
-               vals(k,i) = 0d0; i=i+1
-            else
-               vals(k,i) = d_cons_dt_X0(i_rho,k)/dVol(k); i=i+1
-               vals(k,i) = d_cons_dt_X1(i_rho,k)/dVol(k); i=i+1
-               vals(k,i) = d_cons_dt_X0(i_mom,k)/cons_1(i_rho,k); i=i+1
-               vals(k,i) = d_cons_dt_X1(i_mom,k)/cons(i_rho,k); i=i+1
-               vals(k,i) = d_cons_dt_X0(i_etot,k)/dVol(k); i=i+1
-               vals(k,i) = d_cons_dt_X1(i_etot,k)/dVol(k); i=i+1
-            end if
+            vals(k,i) = plot_r(k); i=i+1
+            vals(k,i) = plot_L(k); i=i+1
+            vals(k,i) = plot_rho(k); i=i+1
+            vals(k,i) = plot_T(k); i=i+1
+            vals(k,i) = plot_v(k); i=i+1
+            vals(k,i) = plot_csound(k); i=i+1
+            vals(k,i) = plot_etot(k); i=i+1
+            vals(k,i) = plot_ekin(k); i=i+1
+            vals(k,i) = plot_eeos(k); i=i+1
+            vals(k,i) = plot_Peos(k); i=i+1
             vals(k,i) = imex1(k); i=i+1
             vals(k,i) = imex2(k); i=i+1
             vals(k,i) = imex3(k); i=i+1
@@ -251,12 +252,16 @@
       
       subroutine do_imex(s, ierr)
          use imex, only: &
-            start_imex, steps_imex, get_imex_data, finish_imex, &
-            max_calls, nsteps_per_call
+            start_imex, steps_imex, finish_imex, &
+            max_calls, nsteps_per_call, &
+            model_number_for_nsteps_per_call2, nsteps_per_call2
+         use imex_work, only: total_newton_iters, total_gmres_matvecs
          type (star_info), pointer :: s
          integer, intent(out) :: ierr
-         integer :: nsteps_taken, i, nz
+         integer :: nsteps_taken, i, nz, nsteps
          real(dp) :: time, dt, total_energy_initial
+         integer(8) :: time0, time1, clock_rate
+         real(dp) :: runtime
          logical :: final_step, must_write_files
          include 'formats'
          if (max_calls <= 0) then
@@ -265,11 +270,17 @@
             return
          end if
          ierr = 0
+         call system_clock(time0,clock_rate)
          call start_imex(total_energy_initial, ierr)
          if (ierr /= 0) stop 'start_imex error'
-         do i = 1, max_calls
+         do i = 1, max_calls 
+            if (s% model_number >= model_number_for_nsteps_per_call2) then
+               nsteps = nsteps_per_call2
+            else
+               nsteps = nsteps_per_call
+            end if
             call steps_imex( &
-               nsteps_per_call, time, dt, &
+               nsteps, time, dt, &
                final_step, nsteps_taken, nz, ierr)
             if (ierr /= 0) stop 'steps_imex error'
             s% nz = nz
@@ -277,9 +288,6 @@
             s% time = time
             s% star_age = time/secyer
             s% dt = dt
-            call get_imex_data( &
-               s% r, s% rho, s% energy, s% Peos, s% v, s% T, s% L, s% csound, s% v_div_csound)
-            if (ierr /= 0) stop 'get_imex_data error'
             if (s% job% pgstar_flag) then
                s% RTI_flag = .true. ! for profile_getval
                s% v_flag = .true.; s% u_flag = .false. ! for profile_getval
@@ -294,7 +302,10 @@
          end do
          call finish_imex(ierr)
          if (ierr /= 0) stop 'finish_imex error'
-         !stop 'do_imex'
+         call system_clock(time1,clock_rate)
+         runtime = real(time1 - time0, dp) / clock_rate / 60
+         write(*,'(/,a,f12.2,99i14/)') 'runtime (minutes), steps newton_iters gmres_matvecs ', &
+              runtime, s% model_number, total_newton_iters, total_gmres_matvecs
          ierr = -1 ! to terminate the star run         
       end subroutine do_imex
 

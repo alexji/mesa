@@ -2,8 +2,8 @@
    ! 2001 bates et al "Barenblatt test"
    ! Nonlinear thermal conduction from a point source
    ! hydrodynamic motion disabled
-
    problem_number = 1
+   
    nz = 200
    
    initial_dt = 1d-28  ! for TCb = 2.5d0
