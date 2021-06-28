@@ -246,7 +246,7 @@
       
       
       subroutine my_gemm0_p1(m,n,k,a,lda,b,ldb,c,ldc)
-         ! c := -a*b
+         ! c := a*b
          integer, intent(in) :: k,lda,ldb,ldc,m,n
          real(fltp), dimension(:,:) :: a, b, c ! a(lda,*),b(ldb,*),c(ldc,*)
          integer :: j, i

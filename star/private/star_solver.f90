@@ -144,7 +144,6 @@
             rhs1, ddx1, xder1, &
             save_blks, save_ublk1, save_dblk1, save_lblk1
          integer, dimension(:), pointer :: ipiv1
-         integer, dimension(:), pointer :: ipiv_blk1
          character (len=s%nz) :: equed1
 
          real(dp), dimension(:,:), pointer :: A, Acopy
@@ -1041,7 +1040,7 @@
             end do
             
             done = .false.
-            if (.false.) then ! testing GMRES
+            if (s% x_logical_ctrl(19)) then ! testing GMRES
             
                ! preconditioning
                ! The special case of block tridiagonality
@@ -1050,8 +1049,9 @@
                soln1(1:neq) = 0d0 ! simplest initial guess for now
                call solve_mtx_eqn_with_GMRES( &
                   s, nvar, nz, b1, soln1, lblk, dblk, ublk, &
-                  3*nvar*neq, save_blks, dblkF1, ipiv1, ierr)
-                  ! use save_blks, dblkF1, ipiv1 as work arrays
+                  lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, &
+                  row_scale_factors1, col_scale_factors1, &
+                  3*nvar*neq, save_blks, ipiv1, ierr)
             
                if (ierr /= 0) then
                   ierr = 0
@@ -1101,7 +1101,7 @@
             use star_bcyclic, only: bcyclic_factor
             integer, intent(out) :: ierr
             call bcyclic_factor( &
-               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv_blk1, &
+               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
                B1, row_scale_factors1, col_scale_factors1, &
                equed1, iter, ierr)
          end subroutine factor_mtx
@@ -1111,7 +1111,7 @@
             use star_bcyclic, only: bcyclic_solve
             integer, intent(out) :: ierr
             call bcyclic_solve( &
-               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv_blk1, &
+               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
                B1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
                iter, ierr)
          end subroutine solve_mtx
@@ -1911,8 +1911,6 @@
                return
             end if
 
-            ipiv_blk1(1:neq) => ipiv1(1:neq)
-
             A(1:3*nvar,1:neq) => A1(1:3*nvar*neq)
             Acopy1 => A1
             Acopy => A
@@ -1968,15 +1966,19 @@
 
       subroutine solve_mtx_eqn_with_GMRES( &
             s, nvar, nz, rhs1, soln1, lblk, dblk, ublk, &
-            nwrk, wrk1, pcond1, ipiv1, ierr)
+            lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, &
+            row_scale_factors1, col_scale_factors1, &
+            nwrk, wrk1, ipiv1, ierr)
          type (star_info), pointer :: s
          integer, intent(in) :: nvar, nz, nwrk
-         real(dp), intent(in) :: rhs1(:) ! the right hand side of the linear system
-         real(dp), intent(inout) :: soln1(:)
+         real(dp), intent(in), pointer :: rhs1(:) ! the right hand side of the linear system
+         real(dp), intent(inout), pointer :: soln1(:)
             ! on input, an approximation to the solution. 
             ! on output, an improved approximation.
          real(dp), intent(in), dimension(:,:,:), pointer :: lblk, dblk, ublk ! (nvar,nz)
-         real(dp), intent(out), dimension(:), pointer :: wrk1, pcond1 ! (nwrk)
+         real(dp), intent(out), dimension(:), pointer :: wrk1 ! (nwrk)
+         real(dp), intent(out), dimension(:), pointer :: &
+            lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, row_scale_factors1, col_scale_factors1
          integer, intent(out), dimension(:), pointer :: ipiv1 ! (nwrk)
          integer, intent(out) :: ierr
          integer :: neq, i, itr_max, mr
@@ -1984,8 +1986,9 @@
          real(dp), dimension(:), pointer :: &
             work, r, cs, g, sn, y, v1, h1, b1, prod1
          real(dp), dimension(:,:), pointer :: v, h, b, prod
-         real(dp), dimension(:,:,:), pointer :: pcond
+         real(dp), dimension(:,:,:), pointer :: p_diag, p_g, lblkF, dblkF, ublkF
          integer, dimension(:,:), pointer :: ipiv
+         character (len=nz) :: equed1
          include 'formats'
          ierr = 0
          itr_max = 20
@@ -2008,8 +2011,15 @@
          b(1:nvar,1:nz) => b1(1:neq)
          prod1(1:neq) => work(i:i+neq-1); i = i+neq
          prod(1:nvar,1:nz) => prod1(1:neq)
-         pcond(1:nvar,1:nvar,1:nz) => pcond1(1:nvar*neq)
+         
+         lblkF(1:nvar,1:nvar,1:nz) => lblkF1(1:nvar*neq)
+         dblkF(1:nvar,1:nvar,1:nz) => dblkF1(1:nvar*neq)
+         ublkF(1:nvar,1:nvar,1:nz) => ublkF1(1:nvar*neq)
          ipiv(1:nvar,1:nz) => ipiv1(1:neq)
+         
+         !X => lblkF
+         p_diag => dblkF
+         p_g => ublkF
          
          if (i > nwrk) then
             write(*,2) 'i', i
@@ -2017,67 +2027,179 @@
             stop 'i > nwrk in solve_mtx_eqn_with_GMRES'
          end if
          
-         call create_pcond(ierr)
+         call create_preconditioner(ierr)
          if (ierr /= 0) then
-            stop 'create_pcond failed in solve_mtx_eqn_with_GMRES'
+            stop 'create_preconditioner failed in solve_mtx_eqn_with_GMRES'
          end if
+         
+         !call test02 ( )
+         call test02_ILU_CR ( )
+         
+         
+         
+         copy test02_ILU_CR here and try with mgmres
+         
+         
+         
+         
+         stop 'solve_mtx_eqn_with_GMRES'
+         !call test_preconditioner(ierr)
+         !if (ierr /= 0) then
+         !   stop 'test_preconditioner failed in solve_mtx_eqn_with_GMRES'
+         !end if
 
          call mgmres ( &
-            neq, matvec, psolve, soln1, rhs1, itr_max, mr, tol_abs, tol_rel, &
+            neq, matvec, apply, soln1, rhs1, itr_max, mr, tol_abs, tol_rel, &
             r, v, cs, g, h, sn, y, ierr )
          
          contains
    
-         subroutine create_pcond(ierr) ! factor each dblk
-            use star_bcyclic, only: my_getf2_n4, my_getf2_n5, my_getf2
+         subroutine test_preconditioner(ierr) 
+            integer, intent(out) :: ierr
+            integer :: i
+            include 'formats'
+            write(*,*) 'test_preconditioner'
+            soln1 = rhs1
+            call apply(soln1) ! soln = precond(rhs)
+            call matvec(soln1, b1) ! b = mtx(soln)
+            ! for precond = inv(mtx), will have b1 == rhs1
+            do i=1,neq
+               if (abs(b1(i) - rhs1(i)) > 1d-11+1d-10*abs(rhs1(i))) then
+                  write(*,2) 'err b rhs1', i, b1(i) - rhs1(i), b1(i), rhs1(i)
+               end if
+            end do
+            stop 'test_preconditioner'
+         end subroutine test_preconditioner
+   
+         subroutine create_preconditioner(ierr) 
+            use star_bcyclic, only: bcyclic_factor
+            ! p_diag = preconditioner diagonal blocks
             integer, intent(out) :: ierr
             integer :: i, j, k, op_err
-            ierr = 0
-            !$OMP PARALLEL DO private(i,j,k,op_err)
+            real(dp) :: work(nvar)
+            real(dp), dimension(nvar,nvar) :: temp1, temp2, temp3
+            include 'formats'
+
             do k=1,nz
-               do j=1,nz
-                  !$omp simd
-                  do i=1,nz
-                     pcond(i,j,k) = dblk(i,j,k)
-                  end do
-               end do
-               op_err = 0
-               if (nvar == 4) then
-                  call my_getf2_n4(pcond(:,:,k), ipiv(:,k), op_err)
-               else if (nvar == 5) then
-                  call my_getf2_n5(pcond(:,:,k), ipiv(:,k), op_err)
-               else
-                  call my_getf2(nvar, pcond(:,:,k), nvar, ipiv(:,k), op_err)
-               end if
-               if (op_err /= 0) ierr = op_err
+               call blk_inverse(k, dblk(:,:,k), p_diag(:,:,k), ipiv(:,k), ierr)
             end do
-            !$OMP END PARALLEL DO
-         end subroutine create_pcond
-   
-         subroutine psolve(x1) ! set x = pcond*x
-            use star_bcyclic, only: my_getrs1_n4, my_getrs1_n5, my_getrs1
-            real(dp), intent(inout) :: x1(:) ! (neq)
-            integer :: i, k, op_err
-            ierr = 0
             return
-            !$OMP PARALLEL DO private(i,k,op_err)
-            do k=1,nz
-               i = nvar*(k-1)
-               op_err = 0
-               if (nvar == 4) then
-                  call my_getrs1_n4( &
-                     pcond(:,:,k), ipiv(:,k), x1(i+1:i+nvar), op_err)
-               else if (nvar == 5) then
-                  call my_getrs1_n5( &
-                     pcond(:,:,k), ipiv(:,k), x1(i+1:i+nvar), op_err)
-               else
-                  call my_getrs1( &
-                     nvar, pcond(:,:,k), nvar, ipiv(:,k), x1(i+1:i+nvar), nvar, op_err)
+
+
+
+
+            ! p_diag(:,:,1) = inv(dblk(:,:,1))
+            call blk_inverse(k, dblk(:,:,1), p_diag(:,:,1), ipiv(:,1), ierr)
+               if (ierr /= 0) then
+                  write(*,2) '1', 1
+                  stop 'blk_inverse failed in create_preconditioner'
                end if
-               if (op_err /= 0) ierr = op_err
+            ! p_g(:,:,1) = p_diag(:,:,1)*lblk(:,:,2)
+            call mm_0(p_diag(:,:,1), lblk(:,:,2), p_g(:,:,1))
+            do k=2,nz-1
+               call set1_p_diag(k)
+               ! p_g(:,:,k) = p_diag(:,:,k)*lblk(:,:,k+1)
+               call mm_0(p_diag(:,:,k), lblk(:,:,k+1), p_g(:,:,k))
             end do
-            !$OMP END PARALLEL DO
-         end subroutine psolve
+            call set1_p_diag(nz)
+         end subroutine create_preconditioner
+   
+         subroutine apply(x) ! apply preconditioner to x
+            use star_bcyclic, only: bcyclic_solve
+            real(dp), intent(inout) :: x(:) ! (neq)
+            integer :: i, k, i1, i2
+            real(dp) :: c(neq), temp(nvar)
+            include 'formats'
+            ierr = 0
+            
+            do k=1,nz
+               i1 = nvar*(k-1)+1; i2 = i1+nvar-1 ! X(:,k) is x(i1:i2)
+               call mv_self(p_diag(:,:,k), x(i1:i2)) ! x = a*x
+            end do
+            return
+            
+            
+            
+            
+            
+            
+            col_scale_factors1 = x
+            call bcyclic_solve( &
+               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+               col_scale_factors1, row_scale_factors1, row_scale_factors1, col_scale_factors1, equed1, &
+               0, ierr)
+            if (ierr /= 0) stop 'apply failed in solve_mtx'
+            x = row_scale_factors1
+            return
+            
+            
+            
+            
+            
+            
+            
+            ! C(:,1)=p_diag(:,:,1)*X(:,1);
+            call mv_0(ublk(:,:,k), x(1:nvar), c(1:nvar))
+            do k = 2, nz
+               i1 = nvar*(k-1)+1; i2 = i1+nvar-1 ! X(:,k) is x(i1:i2)
+               ! C(:,k)=p_diag(:,:,k)*( X(:,k) - ublk(:,:,k-1)*c(:,k-1) );
+               temp(:) = x(i1:i2)
+               call mv_minus(ublk(:,:,k-1), c(i1-nvar:i2-nvar), temp(:))
+               call mv_0(p_diag(:,:,k), temp(:), c(i1:i2))
+            end do
+            ! x(:,nblk)=C(:,nblk);
+            i1 = nvar*(nz-1)+1; i2 = i1+nvar-1 ! X(:,nz) is x(i1:i2)
+            x(i1:i2) = c(i1:i2)
+            do k = (nz-1), 1, -1
+               i1 = nvar*(k-1)+1; i2 = i1+nvar-1 ! X(:,k) is x(i1:i2)
+               ! x(:,k)=C(:,k) - p_g(:,:,k)*X(:,k+1);
+               x(i1:i2) = c(i1:i2)
+               call mv_minus(p_g(:,:,k), x(i1+nvar:i2+nvar), x(i1:i2))
+            end do
+         end subroutine apply
+         
+         subroutine blk_inverse(k, blk, blk_inv, ipiv, ierr)
+            integer, intent(in) :: k
+            real(dp), intent(in) :: blk(:,:)
+            real(dp), intent(out) :: blk_inv(:,:)
+            integer, intent(out) :: ipiv(:)
+            integer, intent(out) :: ierr
+            include 'formats'
+            blk_inv = blk
+            call DGETRF(nvar, nvar, blk_inv, nvar, ipiv, ierr)
+            if (ierr /= 0) then
+               write(*,3) 'DGETRF failed', k, ierr
+               stop 'create_pcond'
+            end if
+            call DGETRI(nvar, blk_inv, nvar, ipiv, work, nvar, ierr)
+            if (ierr /= 0) then
+               write(*,3) 'DGETRI failed', k, ierr
+               stop 'create_pcond'
+            end if         
+         end subroutine blk_inverse
+
+         subroutine do_block_dble_mv(nvar, nz, lblk, dblk, ublk, b, prod)
+            ! set prod = A*b with A = block tridiagonal given by lblk, dblk, ublk
+            integer, intent(in) :: nvar, nz    
+            real(dp), pointer, dimension(:,:,:), intent(in) :: lblk, dblk, ublk ! (nvar,nvar,nz)
+            real(dp), pointer, dimension(:,:), intent(in) :: b ! (nvar,nz)
+            real(dp), pointer, dimension(:,:), intent(inout) :: prod ! (nvar,nz)         
+            integer :: k        
+            !$OMP PARALLEL DO PRIVATE(k)
+            do k = 1, nz
+               ! prod(k) = dblk(k)*b(k)
+               call mv_0(dblk(:,:,k), b(:,k), prod(:,k))
+               if (k > 1) then
+                  ! prod(k) = prod(k) + lblk(k)*b(k-1)
+                  call mv_plus(lblk(:,:,k), b(:,k-1), prod(:,k))
+               end if
+               if (k < nz) then
+                  ! prod(k) = prod(k) + ublk(k)*b(k+1)
+                  call mv_plus(ublk(:,:,k), b(:,k+1), prod(:,k))
+               end if
+            end do      
+            !$OMP END PARALLEL DO         
+         end subroutine do_block_dble_mv                  
    
          subroutine matvec(x, r) ! set r = Jacobian*x
             real(dp), intent(in) :: x(:) ! (neq)
@@ -2094,28 +2216,121 @@
                r(i) = prod1(i)
             end do                  
          end subroutine matvec
-
-         subroutine do_block_dble_mv(nvar, nz, lblk, dblk, ublk, b, prod)
-            ! set prod = A*b with A = block tridiagonal given by lblk, dblk, ublk
-            use star_bcyclic, only: my_gemv_p1
-            integer, intent(in) :: nvar, nz    
-            real(dp), pointer, dimension(:,:,:), intent(in) :: lblk, dblk, ublk ! (nvar,nvar,nz)
-            real(dp), pointer, dimension(:,:), intent(in) :: b ! (nvar,nz)
-            real(dp), pointer, dimension(:,:), intent(inout) :: prod ! (nvar,nz)         
-            integer :: k        
-            !$OMP PARALLEL DO PRIVATE(k)
-            do k = 1, nz
-               prod(1:nvar,k) = 0
-               call my_gemv_p1(nvar,nvar,dblk(:,:,k),nvar,b(:,k),prod(:,k))
-               if (k > 1) then
-                  call my_gemv_p1(nvar,nvar,lblk(:,:,k),nvar,b(:,k-1),prod(:,k))
-               end if
-               if (k < nz) then
-                  call my_gemv_p1(nvar,nvar,ublk(:,:,k),nvar,b(:,k+1),prod(:,k))
-               end if
+         
+         subroutine set1_p_diag(k)
+            integer, intent(in) :: k
+            integer :: ierr
+            real(dp), dimension(nvar,nvar) :: temp
+            include 'formats'
+            ! temp(:,:) = dblk(:,:) - ublk(:,:,k-1)*p_g(:,:,k-1)
+            temp(:,:) = dblk(:,:,k)
+            call mm_minus(ublk(:,:,k-1), p_g(:,:,k-1), temp(:,:))      
+            ! p_diag(:,:,k)=inv(temp(:,:))
+            call blk_inverse(k, temp(:,:), p_diag(:,:,k), ipiv(:,k), ierr)
+            if (ierr /= 0) then
+               write(*,2) 'nz', nz
+               stop 'blk_inverse failed in set1_p_diag'
+            end if
+         end subroutine set1_p_diag
+            
+         subroutine mm_0(a, b, c) ! c := a*b, c different than b
+            real(dp), dimension(:,:) :: a, b, c ! (nvar,nvar)
+            integer :: j, i
+            include 'formats'
+            do j=1,nvar
+               do i=1,nvar
+                  c(i,j) = 0d0
+               end do
+            end do
+            call mm_plus(a, b, c)
+         end subroutine mm_0      
+      
+         subroutine mm_plus(a, b, c) ! c := c + a*b
+            real(dp), dimension(:,:) :: a, b, c ! (nvar,nvar)
+            real(dp) :: tmp
+            integer :: j, l, i
+            do j = 1,nvar
+               do l = 1,nvar
+                  tmp = b(l,j)
+                  if (tmp /= 0d0) then
+                     do i = 1,nvar
+                        c(i,j) = c(i,j) + tmp*a(i,l)
+                     end do
+                  end if
+               end do
             end do      
-            !$OMP END PARALLEL DO         
-         end subroutine do_block_dble_mv                  
+         end subroutine mm_plus
+      
+         subroutine mm_minus(a, b, c) ! c := c - a*b
+            real(dp), dimension(:,:) :: a, b, c ! (nvar,nvar)
+            real(dp) :: tmp
+            integer :: j, l, i
+            do j = 1,nvar
+               do l = 1,nvar
+                  tmp = b(l,j)
+                  if (tmp /= 0d0) then
+                     do i = 1,nvar
+                        c(i,j) = c(i,j) - tmp*a(i,l)
+                     end do
+                  end if
+               end do
+            end do      
+         end subroutine mm_minus
+
+         subroutine mv_self(a,x) ! x = a*x
+            real(dp) :: a(:,:) ! (nvar,nvar)
+            real(dp) :: x(:) ! (nvar)
+            real(dp) :: tmp, temp(nvar)
+            integer :: j
+            !$omp simd
+            do j = 1,nvar
+               temp(j) = x(j)
+            end do
+            call mv_0(a,temp,x) 
+         end subroutine mv_self
+
+         subroutine mv_0(a,x,y) ! y = a*x, y different than x
+            real(dp) :: a(:,:) ! (nvar,nvar)
+            real(dp) :: x(:), y(:) ! (nvar)
+            real(dp) :: tmp
+            integer :: j
+            do j = 1,nvar
+               y(j) = 0d0
+            end do
+            call mv_plus(a,x,y)
+         end subroutine mv_0
+
+         subroutine mv_plus(a,x,y) ! y = y + a*x, y different than x
+            real(dp) :: a(:,:) ! (nvar,nvar)
+            real(dp) :: x(:), y(:) ! (nvar)
+            real(dp) :: tmp
+            integer :: j, i
+            do j = 1,nvar
+               tmp = x(j)
+               if (tmp /= 0d0) then
+                  !$omp simd
+                  do i = 1,nvar
+                     y(i) = y(i) + tmp*a(i,j)
+                  end do
+               end if
+            end do
+         end subroutine mv_plus
+
+         subroutine mv_minus(a,x,y) ! y = y - a*x, y different than x
+            real(dp) :: a(:,:) ! (nvar,nvar)
+            real(dp) :: x(:), y(:) ! (nvar)
+            real(dp) :: tmp
+            integer :: j, i
+            do j = 1,nvar
+               tmp = x(j)
+               if (tmp /= 0d0) then
+                  !$omp simd
+                  do i = 1,nvar
+                     y(i) = y(i) - tmp*a(i,j)
+                  end do
+               end if
+            end do
+         end subroutine mv_minus
             
       end subroutine solve_mtx_eqn_with_GMRES
 
@@ -2234,41 +2449,37 @@
          end interface
          real(dp), intent(inout) :: x(:) ! (n)   initial guess on input, result on output
          real(dp), intent(in) :: rhs(:) ! (n)
-         real(dp), intent(out), dimension(:) :: r, c, g, s, y
-         real(dp), intent(out), dimension(:,:) :: v, h
          integer, intent(in) :: itr_max, mr
          real(dp), intent(in) :: tol_abs, tol_rel
+         real(dp), intent(out), dimension(:) :: r, c, g, s, y
+         real(dp), intent(out), dimension(:,:) :: v, h
          integer, intent(out) :: ierr
-         
+
          real(dp) :: av, mu, rho, rho_tol, htmp
          integer :: i, itr, itr_used, j, k, k_copy
          real(dp), parameter :: delta = 1.0D-03
          logical, parameter :: verbose = .true.
-         include 'formats'
-         ierr = 0
          itr_used = 0
+         ierr = 0
          if ( n < mr ) then
             write ( *, '(a)' ) ' '
             write ( *, '(a)' ) 'MGMRES_ST - Fatal error!'
             write ( *, '(a)' ) '  N < MR.'
             write ( *, '(a,i8)' ) '  N = ', n
             write ( *, '(a,i8)' ) '  MR = ', mr
-            stop
+            stop 'MGMRES'
          end if
          do itr = 1, itr_max ! loop back to here for restarts
             call matvec ( x, r )
             !$omp simd
             do j=1,n
-               r(j) = rhs(j) - r(j)
+               r(j) = rhs(j) - r(j) ! residual = rhs - trial solution
             end do
-            call psolve ( r ) ! apply pcond to residual
+            call psolve ( r ) ! apply to residual
             rho = sqrt ( dot_product ( r(1:n), r(1:n) ) )
             if ( verbose ) &
                write ( *, '(a,i8,a,g14.6)' ) '  ITR = ', itr, '  Residual = ', rho
-            if (is_bad(rho)) then
-               ierr = -1
-               return
-            end if
+            if (is_bad(rho)) stop 'MGMRES bad residual'
             if ( itr == 1 ) rho_tol = rho * tol_rel
             if ( rho <= rho_tol .and. rho <= tol_abs ) exit
             !$omp simd
@@ -2282,7 +2493,7 @@
             do k = 1, mr
                k_copy = k
                call matvec ( v(1:n,k), v(1:n,k+1) )
-               call psolve ( v(1:n,k+1) ) ! apply pcond to result of matvec
+               call psolve ( v(1:n,k+1) ) ! apply to result of matvec
                av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
                do j = 1, k
                   h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
@@ -2323,29 +2534,17 @@
                   end do
                end if
                mu = sqrt ( pow2(h(k,k)) + pow2(h(k+1,k)) )
-               if (mu == 0d0 .or. is_bad(mu)) then
-                  if (verbose) write(*,2) 'gmres mu', k, mu
-                  ierr = -1
-                  return
-               end if
                c(k) = h(k,k) / mu
                s(k) = -h(k+1,k) / mu
                h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
                h(k+1,k) = 0.0D+00
-               call mult_givens ( c(k), s(k), k, g(1:k+1) )
+               call mult_givens ( c(k), s(k), k, g )
                rho = abs ( g(k+1) )
                itr_used = itr_used + 1
                if ( verbose ) then
                   write ( *, '(a,i8,a,g14.6)' ) '  K =   ', k, '  Residual = ', rho
                end if
-               if (is_bad(rho)) then
-                  write(*,2) 'gmres rho', k, rho
-                  write(*,2) 'c(k)', k, c(k)
-                  write(*,2) 's(k)', k, s(k)
-                  write(*,2) 'g(k+1)', k+1, g(k+1)
-                  write(*,2) 'g(k)', k, g(k)
-                  stop 'MGMRES'
-               end if
+               if (is_bad(rho)) stop 'MGMRES bad residual'
                if ( rho <= rho_tol .and. rho <= tol_abs ) exit
             end do ! k loop
             k = k_copy - 1
@@ -2364,6 +2563,7 @@
             write ( *, '(a)'       ) 'MGMRES:'
             write ( *, '(a,i8)'    ) '  Iterations = ', itr_used
             write ( *, '(a,g14.6)' ) '  Final residual = ', rho
+            stop 'MGMRES'
          end if
          
          contains
@@ -2380,6 +2580,2091 @@
          end subroutine mult_givens
          
       end subroutine mgmres
+      
+      
+      !*****************************************************************************80
+      ! 
+      ! TESTING
+      !
+      !*****************************************************************************80
+      
+      subroutine atx_cr ( n, nz_num, ia, ja, a, x, w )
+
+      !*****************************************************************************80
+      !
+      !! ATX_CR computes A'*x for a matrix stored in sparse compressed row form.
+      !
+      !  Discussion:
+      !
+      !    The Sparse Compressed Row storage format is used.
+      !
+      !    The matrix A is assumed to be sparse.  To save on storage, only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA[I] through IA[I+1]-1.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    17 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.  The row vector has been compressed.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input, real ( kind = 8 ) X(N), the vector to be multiplied by A'.
+      !
+      !    Output, real ( kind = 8 ) W(N), the value of A'*X.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k1
+        integer ( kind = 4 ) k2
+        real ( kind = 8 ) w(n)
+        real ( kind = 8 ) x(n)
+
+        w(1:n) = 0.0D+00
+
+        do i = 1, n
+          k1 = ia(i)
+          k2 = ia(i+1) - 1
+          w(ja(k1:k2)) = w(ja(k1:k2)) + a(k1:k2) * x(i)
+        end do
+
+        return
+      end subroutine atx_cr
+      
+      subroutine atx_st ( n, nz_num, ia, ja, a, x, w )
+
+      !*****************************************************************************80
+      !
+      !! ATX_ST computes A'*x for a matrix stored in sparset triplet form.
+      !
+      !  Discussion:
+      !
+      !    The matrix A is assumed to be sparse.  To save on storage, only
+      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
+      !    entry in the matrix is stored by:
+      !
+      !      A(K) = value of entry,
+      !      IA(K) = row of entry,
+      !      JA(K) = column of entry.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    08 August 2006
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(NZ_NUM), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input, real ( kind = 8 ) X(N), the vector to be multiplied by A'.
+      !
+      !    Output, real ( kind = 8 ) W(N), the value of A'*X.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(nz_num)
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        real ( kind = 8 ) w(n)
+        real ( kind = 8 ) x(n)
+
+        w(1:n) = 0.0D+00
+
+        do k = 1, nz_num
+          i = ia(k)
+          j = ja(k)
+          w(j) = w(j) + a(k) * x(i)
+        end do
+
+        return
+      end subroutine atx_st
+      
+      subroutine ax_cr ( n, nz_num, ia, ja, a, x, w )
+
+      !*****************************************************************************80
+      !
+      !! AX_CR computes A*x for a matrix stored in sparse compressed row form.
+      !
+      !  Discussion:
+      !
+      !    The Sparse Compressed Row storage format is used.
+      !
+      !    The matrix A is assumed to be sparse.  To save on storage, only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA[I] through IA[I+1]-1.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    17 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.  The row vector has been compressed.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input, real ( kind = 8 ) X(N), the vector to be multiplied by A.
+      !
+      !    Output, real ( kind = 8 ) W(N), the value of A*X.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k1
+        integer ( kind = 4 ) k2
+        real ( kind = 8 ) w(n)
+        real ( kind = 8 ) x(n)
+
+        w(1:n) = 0.0D+00
+
+        do i = 1, n
+          k1 = ia(i)
+          k2 = ia(i+1) - 1
+          w(i) = w(i) + dot_product ( a(k1:k2), x(ja(k1:k2)) )
+        end do
+
+        return
+      end subroutine ax_cr
+      
+      subroutine ax_st ( n, nz_num, ia, ja, a, x, w )
+
+      !*****************************************************************************80
+      !
+      !! AX_ST computes A*x for a matrix stored in sparset triplet form.
+      !
+      !  Discussion:
+      !
+      !    The matrix A is assumed to be sparse.  To save on storage, only
+      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
+      !    entry in the matrix is stored by:
+      !
+      !      A(K) = value of entry,
+      !      IA(K) = row of entry,
+      !      JA(K) = column of entry.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    08 August 2006
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(NZ_NUM), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input, real ( kind = 8 ) X(N), the vector to be multiplied by A.
+      !
+      !    Output, real ( kind = 8 ) W(N), the value of A*X.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(nz_num)
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        real ( kind = 8 ) w(n)
+        real ( kind = 8 ) x(n)
+
+        w(1:n) = 0.0D+00
+
+        do k = 1, nz_num
+          i = ia(k)
+          j = ja(k)
+          w(i) = w(i) + a(k) * x(j)
+        end do
+
+        return
+      end subroutine ax_st
+      
+      subroutine diagonal_pointer_cr ( n, nz_num, ia, ja, ua )
+
+      !*****************************************************************************80
+      !
+      !! DIAGONAL_POINTER_CR finds diagonal entries in a sparse compressed row matrix.
+      !
+      !  Discussion:
+      !
+      !    The matrix A is assumed to be stored in compressed row format.  Only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA[I] through IA[I+1]-1.
+      !
+      !    The array UA can be used to locate the diagonal elements of the matrix.
+      !
+      !    It is assumed that every row of the matrix includes a diagonal element,
+      !    and that the elements of each row have been ascending sorted.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    18 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.  The row vector has been compressed.
+      !    On output, the order of the entries of JA may have changed because of
+      !    the sorting.
+      !
+      !    Output, integer ( kind = 4 ) UA(N), the index of the diagonal element
+      !    of each row.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) ua(n)
+
+        ua(1:n) = -1
+
+        do i = 1, n
+          do k = ia(i), ia(i+1) - 1
+            if ( ja(k) == i ) then
+              ua(i) = k
+            end if
+          end do
+        end do
+
+        return
+      end subroutine diagonal_pointer_cr
+      
+      subroutine ilu_cr ( n, nz_num, ia, ja, a, ua, l )
+
+      !*****************************************************************************80
+      !
+      !! ILU_CR computes the incomplete LU factorization of a matrix.
+      !
+      !  Discussion:
+      !
+      !    The matrix A is assumed to be stored in compressed row format.  Only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA(I) through IA(I+1)-1.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    27 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.  The row vector has been compressed.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input, integer ( kind = 4 ) UA(N), the index of the diagonal element
+      !    of each row.
+      !
+      !    Output, real ( kind = 8 ) L(NZ_NUM), the ILU factorization of A.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) iw(n)
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) jj
+        integer ( kind = 4 ) jrow
+        integer ( kind = 4 ) jw
+        integer ( kind = 4 ) k
+        real ( kind = 8 ) l(nz_num)
+        real ( kind = 8 ) tl
+        integer ( kind = 4 ) ua(n)
+      !
+      !  Copy A.
+      !
+        l(1:nz_num) = a(1:nz_num)
+
+        do i = 1, n
+      !
+      !  IW points to the nonzero entries in row I.
+      !
+          iw(1:n) = -1
+
+          do k = ia(i), ia(i+1) - 1
+            iw(ja(k)) = k
+          end do
+
+          do j = ia(i), ia(i+1) - 1
+            jrow = ja(j)
+            if ( i <= jrow ) then
+              exit
+            end if
+            tl = l(j) * l(ua(jrow))
+            l(j) = tl
+            do jj = ua(jrow) + 1, ia(jrow+1) - 1
+              jw = iw(ja(jj))
+              if ( jw /= -1 ) then
+                l(jw) = l(jw) - tl * l(jj)
+              end if
+            end do
+          end do
+
+          ua(i) = j
+
+          if ( jrow /= i ) then
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) 'ILU_CR - Fatal error!'
+            write ( *, '(a)' ) '  JROW ~= I'
+            write ( *, '(a,i8)' ) '  JROW = ', jrow
+            write ( *, '(a,i8)' ) '  I    = ', i
+            stop
+          end if
+
+          if ( l(j) == 0.0D+00 ) then
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) 'ILU_CR - Fatal error!'
+            write ( *, '(a,i8)' ) '  Zero pivot on step I = ', i
+            write ( *, '(a,i8,a)' ) '  L(', j, ') = 0.0'
+            stop
+          end if
+
+          l(j) = 1.0D+00 / l(j)
+
+        end do
+
+        l(ua(1:n)) = 1.0D+00 / l(ua(1:n))
+
+        return
+      end subroutine ilu_cr
+      
+      subroutine lus_cr ( n, nz_num, ia, ja, l, ua, r, z )
+
+      !*****************************************************************************80
+      !
+      !! LUS_CR applies the incomplete LU preconditioner.
+      !
+      !  Discussion:
+      !
+      !    The linear system M * Z = R is solved for Z.  M is the incomplete
+      !    LU preconditioner matrix, and R is a vector supplied by the user.
+      !    So essentially, we're solving L * U * Z = R.
+      !
+      !    The matrix A is assumed to be stored in compressed row format.  Only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA(I) through IA(I+1)-1.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    18 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.  The row vector has been compressed.
+      !
+      !    Input, real ( kind = 8 ) L(NZ_NUM), the matrix values.
+      !
+      !    Input, integer ( kind = 4 ) UA(N), the index of the diagonal element
+      !    of each row.
+      !
+      !    Input, real ( kind = 8 ) R(N), the right hand side.
+      !
+      !    Output, real ( kind = 8 ) Z(N), the solution of the system M * Z = R.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        real ( kind = 8 ) l(nz_num)
+        real ( kind = 8 ) r(n)
+        integer ( kind = 4 ) ua(n)
+        real ( kind = 8 ) w(n)
+        real ( kind = 8 ) z(n)
+      !
+      !  Copy R in.
+      !
+        w(1:n) = r(1:n)
+      !
+      !  Solve L * w = w where L is unit lower triangular.
+      !
+        do i = 2, n
+          do j = ia(i), ua(i) - 1
+            w(i) = w(i) - l(j) * w(ja(j))
+          end do
+        end do
+      !
+      !  Solve U * w = w, where U is upper triangular.
+      !
+        do i = n, 1, -1
+          do j = ua(i) + 1, ia(i+1) - 1
+            w(i) = w(i) - l(j) * w(ja(j))
+          end do
+          w(i) = w(i) / l(ua(i))
+        end do
+      !
+      !  Copy Z out.
+      !
+        z(1:n) = w(1:n)
+
+        return
+      end subroutine lus_cr
+      
+      subroutine mgmres_st ( n, nz_num, ia, ja, a, x, rhs, itr_max, mr, tol_abs, &
+        tol_rel )
+
+      !*****************************************************************************80
+      !
+      !! MGMRES_ST applies restarted GMRES to a sparse triplet matrix.
+      !
+      !  Discussion:
+      !
+      !    The linear system A*X=B is solved iteratively.
+      !
+      !    The matrix A is assumed to be stored in sparse triplet form.  Only
+      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
+      !    entry in the matrix is stored by:
+      !
+      !      A(K) = value of entry,
+      !      IA(K) = row of entry,
+      !      JA(K) = column of entry.
+      !
+      !    Thanks to Jesus Pueblas Sanchez-Guerra for supplying two
+      !    corrections to the code on 31 May 2007.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    13 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the linear system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzero matrix values.
+      !
+      !    Input, integer ( kind = 4 ) IA(NZ_NUM), JA(NZ_NUM), the row and column
+      !    indices of the matrix values.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input/output, real ( kind = 8 ) X(N); on input, an approximation to
+      !    the solution.  On output, an improved approximation.
+      !
+      !    Input, real ( kind = 8 ) RHS(N), the right hand side of the linear system.
+      !
+      !    Input, integer ( kind = 4 ) ITR_MAX, the maximum number of (outer)
+      !    iterations to take.
+      !
+      !    Input, integer ( kind = 4 ) MR, the maximum number of (inner) iterations
+      !    to take.  0 < MR <= N.
+      !
+      !    Input, real ( kind = 8 ) TOL_ABS, an absolute tolerance applied to the
+      !    current residual.
+      !
+      !    Input, real ( kind = 8 ) TOL_REL, a relative tolerance comparing the
+      !    current residual to the initial residual.
+      !
+        implicit none
+
+        integer ( kind = 4 ) mr
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        real ( kind = 8 ) av
+        real ( kind = 8 ) c(1:mr)
+        real ( kind = 8 ), parameter :: delta = 1.0D-03
+        real ( kind = 8 ) g(1:mr+1)
+        real ( kind = 8 ) h(1:mr+1,1:mr)
+        real ( kind = 8 ) htmp
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(nz_num)
+        integer ( kind = 4 ) itr
+        integer ( kind = 4 ) itr_max
+        integer ( kind = 4 ) itr_used
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) k_copy
+        real ( kind = 8 ) mu
+        real ( kind = 8 ) r(1:n)
+        real ( kind = 8 ) rho
+        real ( kind = 8 ) rho_tol
+        real ( kind = 8 ) rhs(1:n)
+        real ( kind = 8 ) s(1:mr)
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        real ( kind = 8 ) v(1:n,1:mr+1)
+        logical, parameter :: verbose = .true.
+        real ( kind = 8 ) x(1:n)
+        real ( kind = 8 ) y(1:mr+1)
+
+        itr_used = 0
+
+        if ( n < mr ) then
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) 'MGMRES_ST - Fatal error!'
+          write ( *, '(a)' ) '  N < MR.'
+          write ( *, '(a,i8)' ) '  N = ', n
+          write ( *, '(a,i8)' ) '  MR = ', mr
+          stop
+        end if
+
+        do itr = 1, itr_max
+
+          call ax_st ( n, nz_num, ia, ja, a, x, r )
+
+          r(1:n) = rhs(1:n) - r(1:n)
+
+          rho = sqrt ( dot_product ( r(1:n), r(1:n) ) )
+
+          if ( verbose ) then
+            write ( *, '(a,i8,a,g14.6)' ) '  ITR = ', itr, '  Residual = ', rho
+          end if
+
+          if ( itr == 1 ) then
+            rho_tol = rho * tol_rel
+          end if
+
+          v(1:n,1) = r(1:n) / rho
+
+          g(1) = rho
+          g(2:mr+1) = 0.0D+00
+
+          h(1:mr+1,1:mr) = 0.0D+00
+
+          do k = 1, mr
+
+            k_copy = k
+
+            call ax_st ( n, nz_num, ia, ja, a, v(1:n,k), v(1:n,k+1) )
+
+            av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+
+            do j = 1, k
+              h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
+              v(1:n,k+1) = v(1:n,k+1) - h(j,k) * v(1:n,j)
+            end do
+
+            h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+
+            if ( av + delta * h(k+1,k) == av ) then
+
+              do j = 1, k
+                htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
+                h(j,k) = h(j,k) + htmp
+                v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
+              end do
+
+              h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+
+            end if
+
+            if ( h(k+1,k) /= 0.0D+00 ) then
+              v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
+            end if
+
+            if ( 1 < k ) then
+
+              y(1:k+1) = h(1:k+1,k)
+
+              do j = 1, k - 1
+                call mult_givens ( c(j), s(j), j, y(1:k+1) )
+              end do
+
+              h(1:k+1,k) = y(1:k+1)
+
+            end if
+
+            mu = sqrt ( h(k,k)**2 + h(k+1,k)**2 )
+            c(k) = h(k,k) / mu
+            s(k) = -h(k+1,k) / mu
+            h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
+            h(k+1,k) = 0.0D+00
+            call mult_givens ( c(k), s(k), k, g(1:k+1) )
+            rho = abs ( g(k+1) )
+
+            itr_used = itr_used + 1
+
+            if ( verbose ) then
+              write ( *, '(a,i8,a,g14.6)' ) '  K =   ', k, '  Residual = ', rho
+            end if
+
+            if ( rho <= rho_tol .and. rho <= tol_abs ) then
+              exit
+            end if
+
+          end do
+
+          k = k_copy - 1
+
+          y(k+1) = g(k+1) / h(k+1,k+1)
+
+          do i = k, 1, -1
+            y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
+          end do
+
+          do i = 1, n
+            x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
+          end do
+
+          if ( rho <= rho_tol .and. rho <= tol_abs ) then
+            exit
+          end if
+
+        end do
+
+        if ( verbose ) then
+          write ( *, '(a)'       ) ' '
+          write ( *, '(a)'       ) 'MGMRES_ST:'
+          write ( *, '(a,i8)'    ) '  Iterations = ', itr_used
+          write ( *, '(a,g14.6)' ) '  Final residual = ', rho
+        end if
+
+        return
+      end subroutine mgmres_st
+      
+      subroutine mult_givens ( c, s, k, g )
+
+      !*****************************************************************************80
+      !
+      !! MULT_GIVENS applies a Givens rotation to two successive entries of a vector.
+      !
+      !  Discussion:
+      !
+      !    In order to make it easier to compare this code with the Original C,
+      !    the vector indexing is 0-based.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    08 August 2006
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, real ( kind = 8 ) C, S, the cosine and sine of a Givens
+      !    rotation.
+      !
+      !    Input, integer ( kind = 4 ) K, indicates the location of the first
+      !    vector entry.
+      !
+      !    Input/output, real ( kind = 8 ) G(1:K+1), the vector to be modified.
+      !    On output, the Givens rotation has been applied to entries G(K) and G(K+1).
+      !
+        implicit none
+
+        integer ( kind = 4 ) k
+
+        real ( kind = 8 ) c
+        real ( kind = 8 ) g(1:k+1)
+        real ( kind = 8 ) g1
+        real ( kind = 8 ) g2
+        real ( kind = 8 ) s
+
+        g1 = c * g(k) - s * g(k+1)
+        g2 = s * g(k) + c * g(k+1)
+
+        g(k)   = g1
+        g(k+1) = g2
+
+        return
+      end subroutine mult_givens
+      
+      subroutine pmgmres_ilu_cr ( n, nz_num, ia, ja, a, x, rhs, itr_max, mr, &
+        tol_abs, tol_rel )
+
+      !*****************************************************************************80
+      !
+      !! PMGMRES_ILU_CR applies the preconditioned restarted GMRES algorithm.
+      !
+      !  Discussion:
+      !
+      !    The matrix A is assumed to be stored in compressed row format.  Only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA(I) through IA(I+1)-1.
+      !
+      !    This routine uses the incomplete LU decomposition for the
+      !    preconditioning.  This preconditioner requires that the sparse
+      !    matrix data structure supplies a storage position for each diagonal
+      !    element of the matrix A, and that each diagonal element of the
+      !    matrix A is not zero.
+      !
+      !    Thanks to Jesus Pueblas Sanchez-Guerra for supplying two
+      !    corrections to the code on 31 May 2007.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license. 
+      !
+      !  Modified:
+      !
+      !    28 August 2012
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the linear system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzero matrix values.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), JA(NZ_NUM), the row and column indices
+      !    of the matrix values.  The row vector has been compressed.
+      !
+      !    Input, real ( kind = 8 ) A(NZ_NUM), the matrix values.
+      !
+      !    Input/output, real ( kind = 8 ) X(N); on input, an approximation to
+      !    the solution.  On output, an improved approximation.
+      !
+      !    Input, real ( kind = 8 ) RHS(N), the right hand side of the linear system.
+      !
+      !    Input, integer ( kind = 4 ) ITR_MAX, the maximum number of (outer) 
+      !    iterations to take.
+      !
+      !    Input, integer ( kind = 4 ) MR, the maximum number of (inner) iterations 
+      !    to take.  MR must be less than N.
+      !
+      !    Input, real ( kind = 8 ) TOL_ABS, an absolute tolerance applied to the
+      !    current residual.
+      !
+      !    Input, real ( kind = 8 ) TOL_REL, a relative tolerance comparing the
+      !    current residual to the initial residual.
+      !
+        implicit none
+
+        integer ( kind = 4 ) mr
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        real ( kind = 8 ) av
+        real ( kind = 8 ) c(mr+1)
+        real ( kind = 8 ), parameter :: delta = 1.0D-03
+        real ( kind = 8 ) g(mr+1)
+        real ( kind = 8 ) h(mr+1,mr)
+        real ( kind = 8 ) htmp
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) itr
+        integer ( kind = 4 ) itr_max
+        integer ( kind = 4 ) itr_used
+        integer ( kind = 4 ) j
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) k_copy
+        real ( kind = 8 ) l(ia(n+1)+1)
+        real ( kind = 8 ) mu
+        real ( kind = 8 ) r(n)
+        real ( kind = 8 ) rho
+        real ( kind = 8 ) rho_tol
+        real ( kind = 8 ) rhs(n)
+        real ( kind = 8 ) s(mr+1)
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        integer ( kind = 4 ) ua(n)
+        real ( kind = 8 ) v(n,mr+1);
+        logical, parameter :: verbose = .true.
+        real ( kind = 8 ) x(n)
+        real ( kind = 8 ) y(mr+1)
+
+        itr_used = 0
+
+        call rearrange_cr ( n, nz_num, ia, ja, a )
+
+        call diagonal_pointer_cr ( n, nz_num, ia, ja, ua )
+
+        call ilu_cr ( n, nz_num, ia, ja, a, ua, l )
+
+        if ( verbose ) then
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) 'PMGMRES_ILU_CR'
+          write ( *, '(a,i4)' ) '  Number of unknowns = ', n
+        end if
+
+        do itr = 1, itr_max
+
+          call ax_cr ( n, nz_num, ia, ja, a, x, r )
+
+          r(1:n) = rhs(1:n) - r(1:n)
+
+          call lus_cr ( n, nz_num, ia, ja, l, ua, r, r )
+
+          rho = sqrt ( dot_product ( r, r ) )
+
+          if ( verbose ) then
+            write ( *, '(a,i4,a,g14.6)' ) '  ITR = ', itr, '  Residual = ', rho
+          end if
+
+          if ( itr == 1 ) then
+            rho_tol = rho * tol_rel
+          end if
+
+          v(1:n,1) = r(1:n) / rho
+
+          g(1) = rho
+          g(2:mr+1) = 0.0D+00
+
+          h(1:mr+1,1:mr) = 0.0D+00
+
+          do k = 1, mr
+
+            k_copy = k
+
+            call ax_cr ( n, nz_num, ia, ja, a, v(1:n,k), v(1:n,k+1) ) 
+
+            call lus_cr ( n, nz_num, ia, ja, l, ua, v(1:n,k+1), v(1:n,k+1) )
+
+            av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+
+            do j = 1, k
+              h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
+              v(1:n,k+1) = v(1:n,k+1) - v(1:n,j) * h(j,k)
+            end do
+
+            h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+
+            if ( ( av + delta * h(k+1,k)) == av ) then
+              do j = 1, k
+                htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
+                h(j,k) = h(j,k) + htmp
+                v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
+              end do
+              h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            end if
+
+            if ( h(k+1,k) /= 0.0D+00 ) then
+              v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
+            end if
+
+            if ( 1 < k ) then
+              y(1:k+1) = h(1:k+1,k)
+              do j = 1, k - 1
+                call mult_givens ( c(j), s(j), j, y )
+              end do
+              h(1:k+1,k) = y(1:k+1)
+            end if
+
+            mu = sqrt ( h(k,k)**2 + h(k+1,k)**2 )
+
+            c(k) = h(k,k) / mu
+            s(k) = -h(k+1,k) / mu
+            h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
+            h(k+1,k) = 0.0D+00
+            call mult_givens ( c(k), s(k), k, g )
+
+            rho = abs ( g(k+1) )
+
+            itr_used = itr_used + 1
+
+            if ( verbose ) then
+              write ( *, '(a,i4,a,g14.6)' ) '  K = ', k, '  Residual = ', rho
+            end if
+
+            if ( rho <= rho_tol .and. rho <= tol_abs ) then
+              exit
+            end if
+
+          end do
+
+          k = k_copy - 1
+
+          y(k+1) = g(k+1) / h(k+1,k+1)
+
+          do i = k, 1, -1
+            y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
+          end do
+
+          do i = 1, n
+            x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
+          end do
+
+          if ( rho <= rho_tol .and. rho <= tol_abs ) then
+            exit
+          end if
+
+        end do
+
+        if ( verbose ) then
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) 'PMGMRES_ILU_CR:'
+          write ( *, '(a,i6)' ) '  Iterations = ', itr_used
+          write ( *, '(a,g14.6)' ) '  Final residual = ', rho
+        end if
+
+        return
+      end subroutine pmgmres_ilu_cr
+      
+      subroutine r8vec_uniform_01 ( n, seed, r )
+
+      !*****************************************************************************80
+      !
+      !! R8VEC_UNIFORM_01 returns a unit pseudorandom R8VEC.
+      !
+      !  Discussion:
+      !
+      !    An R8VEC is a vector of real ( kind = 8 ) values.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    05 July 2006
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+      !  Reference:
+      !
+      !    Paul Bratley, Bennett Fox, Linus Schrage,
+      !    A Guide to Simulation,
+      !    Second Edition,
+      !    Springer, 1987,
+      !    ISBN: 0387964673,
+      !    LC: QA76.9.C65.B73.
+      !
+      !    Bennett Fox,
+      !    Algorithm 647:
+      !    Implementation and Relative Efficiency of Quasirandom
+      !    Sequence Generators,
+      !    ACM Transactions on Mathematical Software,
+      !    Volume 12, Number 4, December 1986, pages 362-376.
+      !
+      !    Pierre L'Ecuyer,
+      !    Random Number Generation,
+      !    in Handbook of Simulation,
+      !    edited by Jerry Banks,
+      !    Wiley, 1998,
+      !    ISBN: 0471134031,
+      !    LC: T57.62.H37.
+      !
+      !    Peter Lewis, Allen Goodman, James Miller,
+      !    A Pseudo-Random Number Generator for the System/360,
+      !    IBM Systems Journal,
+      !    Volume 8, Number 2, 1969, pages 136-143.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the number of entries in the vector.
+      !
+      !    Input/output, integer ( kind = 4 ) SEED, the "seed" value, which
+      !    should NOT be 0.  On output, SEED has been updated.
+      !
+      !    Output, real ( kind = 8 ) R(N), the vector of pseudorandom values.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) seed
+        real ( kind = 8 ) r(n)
+
+        if ( seed == 0 ) then
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) 'R8VEC_UNIFORM_01 - Fatal error!'
+          write ( *, '(a)' ) '  Input value of SEED = 0.'
+          stop
+        end if
+
+        do i = 1, n
+
+          k = seed / 127773
+
+          seed = 16807 * ( seed - k * 127773 ) - k * 2836
+
+          if ( seed < 0 ) then
+            seed = seed + 2147483647
+          end if
+
+          r(i) = real ( seed, kind = 8 ) * 4.656612875D-10
+
+        end do
+
+        return
+      end subroutine r8vec_uniform_01
+      
+      subroutine rearrange_cr ( n, nz_num, ia, ja, a )
+
+      !*****************************************************************************80
+      !
+      !! REARRANGE_CR sorts a sparse compressed row matrix.
+      !
+      !  Discussion:
+      !
+      !    This routine guarantees that the entries in the CR matrix
+      !    are properly sorted.
+      !
+      !    After the sorting, the entries of the matrix are rearranged in such
+      !    a way that the entries of each column are listed in ascending order
+      !    of their column values.
+      !
+      !    The matrix A is assumed to be stored in compressed row format.  Only
+      !    the nonzero entries of A are stored.  The vector JA stores the
+      !    column index of the nonzero value.  The nonzero values are sorted
+      !    by row, and the compressed row vector IA then has the property that
+      !    the entries in A and JA that correspond to row I occur in indices
+      !    IA(I) through IA(I+1)-1.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    17 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      !  Parameters:
+      !
+      !    Input, integer ( kind = 4 ) N, the order of the system.
+      !
+      !    Input, integer ( kind = 4 ) NZ_NUM, the number of nonzeros.
+      !
+      !    Input, integer ( kind = 4 ) IA(N+1), the compressed row indices.
+      !
+      !    Input/output, integer ( kind = 4 ) JA(NZ_NUM), the column indices.
+      !    On output, these may have been rearranged by the sorting.
+      !
+      !    Input/output, real ( kind = 8 ) A(NZ_NUM), the matrix values.  On output,
+      !    the matrix values may have been moved somewhat because of the sorting.
+      !
+        implicit none
+
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) nz_num
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) i4temp
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) l
+        real ( kind = 8 ) r8temp
+
+        do i = 1, n
+
+          do k = ia(i), ia(i+1) - 2
+            do l = k + 1, ia(i+1) - 1
+
+              if ( ja(l) < ja(k) ) then
+                i4temp = ja(l)
+                ja(l)  = ja(k)
+                ja(k)  = i4temp
+
+                r8temp = a(l)
+                a(l)   = a(k)
+                a(k)   = r8temp
+              end if
+
+            end do
+          end do
+
+        end do
+
+        return
+      end subroutine rearrange_cr
+      
+      subroutine timestamp ( )
+
+      !*****************************************************************************80
+      !
+      !! TIMESTAMP prints the current YMDHMS date as a time stamp.
+      !
+      !  Example:
+      !
+      !    31 May 2001   9:45:54.872 AM
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    18 May 2013
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+      !  Parameters:
+      !
+      !    None
+      !
+        implicit none
+
+        character ( len = 8 ) ampm
+        integer ( kind = 4 ) d
+        integer ( kind = 4 ) h
+        integer ( kind = 4 ) m
+        integer ( kind = 4 ) mm
+        character ( len = 9 ), parameter, dimension(12) :: month = (/ &
+          'January  ', 'February ', 'March    ', 'April    ', &
+          'May      ', 'June     ', 'July     ', 'August   ', &
+          'September', 'October  ', 'November ', 'December ' /)
+        integer ( kind = 4 ) n
+        integer ( kind = 4 ) s
+        integer ( kind = 4 ) values(8)
+        integer ( kind = 4 ) y
+
+        call date_and_time ( values = values )
+
+        y = values(1)
+        m = values(2)
+        d = values(3)
+        h = values(5)
+        n = values(6)
+        s = values(7)
+        mm = values(8)
+
+        if ( h < 12 ) then
+          ampm = 'AM'
+        else if ( h == 12 ) then
+          if ( n == 0 .and. s == 0 ) then
+            ampm = 'Noon'
+          else
+            ampm = 'PM'
+          end if
+        else
+          h = h - 12
+          if ( h < 12 ) then
+            ampm = 'PM'
+          else if ( h == 12 ) then
+            if ( n == 0 .and. s == 0 ) then
+              ampm = 'Midnight'
+            else
+              ampm = 'AM'
+            end if
+          end if
+        end if
+
+        write ( *, '(i2.2,1x,a,1x,i4,2x,i2,a1,i2.2,a1,i2.2,a1,i3.3,1x,a)' ) &
+          d, trim ( month(m) ), y, h, ':', n, ':', s, '.', mm, trim ( ampm )
+
+        return
+      end subroutine timestamp
+      
+      subroutine test02 ( )
+
+      !*****************************************************************************80
+      !
+      !! TEST02 tests MGMRES_ST on a 9 by 9 matrix.
+      !
+      !  Discussion:
+      !
+      !    A = 
+      !      2  0  0 -1  0  0  0  0  0
+      !      0  2 -1  0  0  0  0  0  0
+      !      0 -1  2  0  0  0  0  0  0
+      !     -1  0  0  2 -1  0  0  0  0
+      !      0  0  0 -1  2 -1  0  0  0
+      !      0  0  0  0 -1  2 -1  0  0
+      !      0  0  0  0  0 -1  2 -1  0
+      !      0  0  0  0  0  0 -1  2 -1
+      !      0  0  0  0  0  0  0 -1  2
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license. 
+      !
+      !  Modified:
+      !
+      !    13 July 2007
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+        implicit none
+
+        integer ( kind = 4 ), parameter :: n = 9
+        integer ( kind = 4 ), parameter :: nz_num = 23
+
+        real ( kind = 8 ), dimension(nz_num) :: a = (/ &
+           2.0D+00, -1.0D+00, &
+           2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00, &
+          -1.0D+00,  2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00, -1.0D+00, &
+          -1.0D+00,  2.0D+00 /)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ), dimension(nz_num) :: ia = (/ &
+          1, 1, &
+          2, 2, &
+          3, 3, &
+          4, 4, 4, &
+          5, 5, 5, &
+          6, 6, 6, &
+          7, 7, 7, &
+          8, 8, 8, &
+          9, 9 /)
+        integer ( kind = 4 ) itr_max
+        integer ( kind = 4 ), dimension(nz_num) :: ja = (/ &
+          1, 4, &
+          2, 3, &
+          2, 3, &
+          1, 4, 5, &
+          4, 5, 6, &
+          5, 6, 7, &
+          6, 7, 8, &
+          7, 8, 9, &
+          8, 9 /)
+        integer ( kind = 4 ) mr
+        real ( kind = 8 ), dimension(n) :: rhs = (/ &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00 /)
+        integer ( kind = 4 ) :: seed = 123456789
+        integer ( kind = 4 ) test
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        real ( kind = 8 ) x_error
+        real ( kind = 8 ) x_estimate(n)
+        real ( kind = 8 ), dimension(n) :: x_exact = (/ &
+          3.5D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          6.0D+00, &
+          7.5D+00, &
+          8.0D+00, &
+          7.5D+00, &
+          6.0D+00, &
+          3.5D+00 /)
+
+        write ( *, '(a)' ) ' '
+        write ( *, '(a)' ) 'TEST02'
+        write ( *, '(a)' ) '  Test MGMRES_ST on a matrix that is not quite '
+        write ( *, '(a,i8)' ) '  the -1,2,-1 matrix, of order N = ', n
+
+        do test = 1, 2
+
+          if ( test == 1 ) then
+
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) '  First try, use zero initial vector:'
+            write ( *, '(a)' ) ' '
+
+            x_estimate(1:n) = 0.0D+00
+
+          else
+
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) '  Second try, use random initial vector:'
+            write ( *, '(a)' ) ' '
+
+            call r8vec_uniform_01 ( n, seed, x_estimate )
+
+          end if
+
+          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
+
+          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
+          itr_max = 20
+          mr = n - 1
+          tol_abs = 1.0D-08
+          tol_rel = 1.0D-08
+
+          call mgmres_st ( n, nz_num, ia, ja, a, x_estimate, rhs, itr_max, mr, &
+            tol_abs, tol_rel )
+          !call pmgmres_ilu_cr ( n, nz_num, ia, ja, a, x_estimate, rhs, itr_max, &
+          !  mr, tol_abs, tol_rel )
+
+          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
+
+          write ( *, '(a,g14.6)' ) '  After solving, X_ERROR = ', x_error
+
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) '  Final solution estimate:'
+          write ( *, '(a)' ) ' '
+          do i = 1, n
+            write ( *, '(2x,i8,2x,g14.6)' ) i, x_estimate(i)
+          end do
+
+        end do
+
+        return
+      end subroutine test02
+      
+      
+      subroutine test03 ( )
+
+      !*****************************************************************************80
+      !
+      !! TEST03 tests PMGMRES_ILU_CR on the simple -1,2-1 matrix.
+      !
+      !  Discussion:
+      !
+      !    This is a very weak test, since the matrix has such a simple
+      !    structure, is diagonally dominant (though not strictly), 
+      !    and is symmetric.
+      !
+      !    To make the matrix bigger, simply increase the value of N.
+      !
+      !    Note that PGMRES_ILU_CR expects the matrix to be stored using the
+      !    sparse compressed row format.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license. 
+      !
+      !  Modified:
+      !
+      !    28 August 2012
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+        implicit none
+
+        integer ( kind = 4 ), parameter :: n = 20
+        integer ( kind = 4 ), parameter :: nz_num = ( 3 * n - 2 )
+
+        real ( kind = 8 ) a(nz_num)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) ia(n+1)
+        integer ( kind = 4 ) itr_max
+        integer ( kind = 4 ) ja(nz_num)
+        integer ( kind = 4 ) k
+        integer ( kind = 4 ) mr
+        real ( kind = 8 ) rhs(n)
+        integer ( kind = 4 ) test
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        real ( kind = 8 ) x_error
+        real ( kind = 8 ) x_estimate(n)
+        real ( kind = 8 ) x_exact(n)
+
+        write ( *, '(a)' ) ' '
+        write ( *, '(a)' ) 'TEST03'
+        write ( *, '(a)' ) '  Test PMGMRES_ILU_CR on the simple -1,2-1 matrix.'
+      !
+      !  Set the matrix.
+      !  Note that we use 1-based index values in IA and JA.
+      !
+        k = 1
+        ia(1) = 1
+
+        write ( *, '(a)' ) ' '
+        write ( *, '(a,i4,a,i4)' ) '  ia(', 1, ') = ', ia(1)
+
+        do i = 1, n
+
+          ia(i+1) = ia(i)
+
+          if ( 1 < i ) then
+            ia(i+1) = ia(i+1) + 1
+            ja(k) = i - 1
+            a(k) = -1.0D+00
+            k = k + 1
+          end if
+
+          ia(i+1) = ia(i+1) + 1
+          ja(k) = i
+          a(k) = 2.0D+00
+          k = k + 1
+
+          if ( i < n ) then
+            ia(i+1) = ia(i+1) + 1
+            ja(k) = i + 1
+            a(k) = -1.0D+00
+            k = k + 1
+          end if
+          write ( *, '(a,i4,a,i4)' ) '  ia(', i + 1, ') = ', ia(i+1)
+        end do
+      !
+      !  Set the right hand side:
+      !
+        rhs(1:n-1) = 0.0D+00
+        rhs(n) = real ( n + 1, kind = 8 )
+      !
+      !  Set the exact solution.
+      !
+        do i = 1, n
+          x_exact(i) = real ( i, kind = 8 )
+        end do
+
+        do test = 1, 1 ! 3
+      !
+      !  Set the initial solution estimate.
+      !
+          x_estimate(1:n) = 0.0D+00
+          x_error = 0.0D+00
+          do i = 1, n
+            x_error = x_error + ( x_exact(i) - x_estimate(i) ) ** 2
+          end do
+          x_error = sqrt ( x_error )
+
+          if ( test == 1 ) then
+            itr_max = 1
+            mr = 20
+          else if ( test == 2 ) then
+            itr_max = 2
+            mr = 10
+          else if ( test == 3 ) then
+            itr_max = 5
+            mr = 4
+          end if
+
+          tol_abs = 1.0D-08
+          tol_rel = 1.0D-08
+
+          write ( *, '(a)' ) ' '
+          write ( *, '(a,i4)' ) '  Test ', test
+          write ( *, '(a,i4)' ) '  Matrix order N = ', n
+          write ( *, '(a,i4)' ) '  Inner iteration limit = ', mr
+          write ( *, '(a,i4)' ) '  Outer iteration limit = ', itr_max
+          write ( *, '(a,g14.6)' ) '  Initial X_ERROR = ', x_error
+
+          call pmgmres_ilu_cr ( n, nz_num, ia, ja, a, x_estimate, rhs, itr_max, &
+            mr, tol_abs, tol_rel )
+
+          x_error = 0.0D+00
+          do i = 1, n
+            x_error = x_error + ( x_exact(i) - x_estimate(i) ) ** 2
+          end do
+          x_error = sqrt ( x_error )
+
+          write ( *, '(a,g14.6)' ) '  Final X_ERROR = ', x_error
+
+        end do
+
+        return
+      end subroutine test03
+      
+      
+      subroutine test04 ( )
+
+      !*****************************************************************************80
+      !
+      !! TEST04 tests PMGMRES_ILU_CR on a simple 5 by 5 matrix.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license. 
+      !
+      !  Modified:
+      !
+      !    29 August 2012
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+        implicit none
+
+        integer ( kind = 4 ), parameter :: n = 5
+        integer ( kind = 4 ), parameter :: nz_num = 9
+
+        real ( kind = 8 ), dimension ( nz_num ) :: a = (/ &
+           1.0, 2.0, 1.0, &
+           2.0, &
+           3.0, 3.0, &
+           4.0, &
+           1.0, 5.0 /)
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ), dimension ( n + 1 ) :: ia = (/ 1, 4, 5, 7, 8, 10 /)
+        integer ( kind = 4 ) itr_max
+        integer ( kind = 4 ), dimension ( nz_num ) :: ja = (/ &
+          1, 4, 5, &
+          2, &
+          1, 3, &
+          4, &
+          2, 5 /)
+        integer ( kind = 4 ) mr
+        real ( kind = 8 ), dimension ( n ) :: rhs = (/ &
+          14.0, 4.0, 12.0, 16.0, 27.0 /)
+        integer ( kind = 4 ) test
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        real ( kind = 8 ) x_error
+        real ( kind = 8 ) x_estimate(n)
+        real ( kind = 8 ), dimension ( n ) :: x_exact = (/ 1.0, 2.0, 3.0, 4.0, 5.0 /)
+
+        write ( *, '(a)' ) ' '
+        write ( *, '(a)' ) 'TEST04'
+        write ( *, '(a)' ) '  Test PMGMRES_ILU_CR on a simple 5 x 5 matrix.'
+
+        write ( *, '(a)' ) ' '
+        do i = 1, n
+          write ( *, '(a,i2,a,i2)' ) '  ia(', i, ') = ', ia(i)
+        end do
+ 
+        do test = 1, 3
+      !
+      !  Set the initial solution estimate.
+      !
+          x_estimate(1:n) = 0.0D+00
+          x_error = 0.0D+00
+          do i = 1, n
+            x_error = x_error + ( x_exact(i) - x_estimate(i) ) ** 2
+          end do
+          x_error = sqrt ( x_error )
+
+          if ( test == 1 ) then
+            itr_max = 1
+            mr = 20
+          else if ( test == 2 ) then
+            itr_max = 2
+            mr = 10
+          else if ( test == 3 ) then
+            itr_max = 5
+            mr = 4
+          end if
+
+          tol_abs = 1.0D-08
+          tol_rel = 1.0D-08
+
+          write ( *, '(a)' ) ' '
+          write ( *, '(a,i4)' ) '  Test ', test
+          write ( *, '(a,i4)' ) '  Matrix order N = ', n
+          write ( *, '(a,i4)' ) '  Inner iteration limit = ', mr
+          write ( *, '(a,i4)' ) '  Outer iteration limit = ', itr_max
+          write ( *, '(a,g14.6)' ) '  Initial X_ERROR = ', x_error
+
+          call pmgmres_ilu_cr ( n, nz_num, ia, ja, a, x_estimate, rhs, itr_max, &
+            mr, tol_abs, tol_rel )
+
+          x_error = 0.0D+00
+          do i = 1, n
+            x_error = x_error + ( x_exact(i) - x_estimate(i) ) ** 2
+          end do
+          x_error = sqrt ( x_error )
+
+          write ( *, '(a,g14.6)' ) '  Final X_ERROR = ', x_error
+
+        end do
+
+        return
+      end subroutine test04
+      
+      
+      subroutine test02_ILU_CR ( )
+      !*****************************************************************************80
+      !
+      !! TEST02 modified to use PMGMRES_ILU_CR.    switch from ST to CR.
+      !
+      !
+      !  Discussion:
+      !
+      !    A = 
+      !      2  0  0 -1  0  0  0  0  0
+      !      0  2 -1  0  0  0  0  0  0
+      !      0 -1  2  0  0  0  0  0  0
+      !     -1  0  0  2 -1  0  0  0  0
+      !      0  0  0 -1  2 -1  0  0  0
+      !      0  0  0  0 -1  2 -1  0  0
+      !      0  0  0  0  0 -1  2 -1  0
+      !      0  0  0  0  0  0 -1  2 -1
+      !      0  0  0  0  0  0  0 -1  2
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license. 
+      !
+      !  Modified:
+      !
+      !    13 July 2007
+      !
+      !  Author:
+      !
+      !    John Burkardt
+      !
+        implicit none
+
+        integer ( kind = 4 ), parameter :: n = 9
+        integer ( kind = 4 ), parameter :: nz_num = 23
+        ! nonzero values are sorted by row
+        real ( kind = 8 ), dimension(nz_num) :: a = (/ &
+           2.0D+00, -1.0D+00, & ! row 1
+           2.0D+00, -1.0D+00, & ! row 2 
+          -1.0D+00,  2.0D+00, & ! row 3
+          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 4
+          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 5
+          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 6
+          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 7
+          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 8
+          -1.0D+00,  2.0D+00 /) ! row 9        
+        ! JA stores the column index of the nonzero value
+        integer ( kind = 4 ), dimension(nz_num) :: ja = (/ &
+          1, 4, & ! row 1
+          2, 3, & ! row 2
+          2, 3, & ! row 3
+          1, 4, 5, & ! row 4
+          4, 5, 6, & ! row 5
+          5, 6, 7, & ! row 6
+          6, 7, 8, & ! row 7
+          7, 8, 9, & ! row 8
+          8, 9 /) ! row 9          
+        ! the entries in A and JA that correspond to row I occur in indices
+        ! IA[I] through IA[I+1]-1.
+        integer ( kind = 4 ), dimension(n+1) :: ia = (/ &
+          1, & ! row 1
+          3, & ! row 2
+          5, & ! row 3
+          7, & ! row 4
+          10, & ! row 5
+          13, & ! row 6
+          16, & ! row 7
+          19, & ! row 8
+          22, & ! row 9
+          24  /)           
+        integer ( kind = 4 ) i
+        integer ( kind = 4 ) itr_max          
+        integer ( kind = 4 ) mr
+        real ( kind = 8 ), dimension(n) :: rhs = (/ &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          1.0D+00 /)
+        integer ( kind = 4 ) :: seed = 123456789
+        integer ( kind = 4 ) test
+        real ( kind = 8 ) tol_abs
+        real ( kind = 8 ) tol_rel
+        real ( kind = 8 ) x_error
+        real ( kind = 8 ) x_estimate(n)
+        real ( kind = 8 ), dimension(n) :: x_exact = (/ &
+          3.5D+00, &
+          1.0D+00, &
+          1.0D+00, &
+          6.0D+00, &
+          7.5D+00, &
+          8.0D+00, &
+          7.5D+00, &
+          6.0D+00, &
+          3.5D+00 /)
+
+        write ( *, '(a)' ) ' '
+        write ( *, '(a)' ) 'TEST02_ILU_CR'
+        write ( *, '(a)' ) '  Test pmgmres_ilu_cr on a matrix that is not quite '
+        write ( *, '(a,i8)' ) '  the -1,2,-1 matrix, of order N = ', n
+
+        do test = 1, 2
+
+          if ( test == 1 ) then
+
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) '  First try, use zero initial vector:'
+            write ( *, '(a)' ) ' '
+
+            x_estimate(1:n) = 0.0D+00
+
+          else
+
+            write ( *, '(a)' ) ' '
+            write ( *, '(a)' ) '  Second try, use random initial vector:'
+            write ( *, '(a)' ) ' '
+
+            call r8vec_uniform_01 ( n, seed, x_estimate )
+
+          end if
+
+          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
+
+          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
+          itr_max = 20
+          mr = n - 1
+          tol_abs = 1.0D-08
+          tol_rel = 1.0D-08
+
+          call pmgmres_ilu_cr ( n, nz_num, ia, ja, a, x_estimate, rhs, itr_max, mr, &
+            tol_abs, tol_rel )
+
+          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
+
+          write ( *, '(a,g14.6)' ) '  After solving, X_ERROR = ', x_error
+
+          write ( *, '(a)' ) ' '
+          write ( *, '(a)' ) '  Final solution estimate:'
+          write ( *, '(a)' ) ' '
+          do i = 1, n
+            write ( *, '(2x,i8,2x,g14.6)' ) i, x_estimate(i)
+          end do
+
+        end do
+
+        return
+      end subroutine test02_ILU_CR
+      
 
 
       end module star_solver

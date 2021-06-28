@@ -706,15 +706,16 @@
          include 'formats'
          ierr = 0
          itr_max = 20
-         tol_abs = 1.0D-08
-         tol_rel = 1.0D-08
+         tol_abs = 1.0D-12
+         tol_rel = 1.0D-12
          neq = nz ! only 1 variable per zone for this problem
          do k=1,nz
             gmr_p(k) = 1d0/diag(k)
          end do
          call mgmres( &
             neq, matvec, psolve, deltaT, rhs, itr_max, gmres_mr, tol_abs, tol_rel, &
-            gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y)
+            gmr_r, gmr_v, gmr_cs, gmr_g, gmr_h, gmr_sn, gmr_y, ierr)
+         if (ierr /= 0) stop 'failed in mgmres'
          do k=1,nz
             T(k) = T(k) + deltaT(k)
          end do            
@@ -723,7 +724,12 @@
    
          subroutine psolve(x) ! set x = gmr_p*x
             real(dp), intent(inout) :: x(:) ! (neq)
-            integer :: k
+            integer :: k, ierr
+            if (.false.) then ! test with perfect psolve
+               call solve_tridiag_self(x, nz, ierr)
+               if (ierr /= 0) stop 'solve_tridiag failed'
+               return
+            end if
             !$omp simd
             do k=1,nz
                x(k) = gmr_p(k)*x(k)
@@ -747,6 +753,50 @@
          end subroutine matvec
          
       end subroutine solve_matrix_equation_with_GMRES
+
+
+      subroutine solve_tridiag_test(x, n, ierr)
+         !      sub - sub-diagonal
+         !      diag - the main diagonal
+         !      sup - sup-diagonal
+         !      rhs - right hand side
+         !      x - the answer
+         !      n - number of equations
+         use imex_work, only: sub, diag, sup, rhs, bp, vp, xp
+         integer, intent(in) :: n
+         real(dp), dimension(:), intent(out) :: x ! output
+         integer, intent(out) :: ierr
+         real(dp) :: temp1, temp2, temp3, p_diag(n)
+         integer i
+         ierr = 0
+         sub(n) = 0d0
+         sup(n) = 0d0
+         
+         ! create p_diag
+         p_diag(1) = 1d0/diag(1)
+         do i = 2,n
+            temp1 = sub(i-1)*p_diag(i-1)
+            temp2 = temp1*sup(i-1)
+            temp3 = diag(i) - temp2
+            p_diag(i) = 1d0/temp3
+         end do
+         
+         ! apply
+         vp(1) = rhs(1)
+         do i = 2,n
+            temp1 = sub(i-1)*p_diag(i-1)
+            vp(i) = rhs(i) - temp1*vp(i-1)
+         end do
+         xp(n) = vp(n)*p_diag(n)
+         x(n) = xp(n)
+         do i = n-1, 1, -1
+            temp1 = sup(i)*xp(i+1)
+            temp2 = vp(i) - temp1
+            xp(i) = temp2*p_diag(i)
+            x(i) = xp(i)
+         end do
+
+      end subroutine solve_tridiag_test
 
 
       subroutine solve_tridiag(x, n, ierr)
@@ -779,6 +829,38 @@
             x(i) = xp(i)
          end do
       end subroutine solve_tridiag
+
+
+      subroutine solve_tridiag_self(x, n, ierr) ! use x as rhs
+         !      sub - sub-diagonal
+         !      diag - the main diagonal
+         !      sup - sup-diagonal
+         !      rhs - right hand side
+         !      x - the answer
+         !      n - number of equations
+         use imex_work, only: sub, diag, sup, rhs, bp, vp, xp
+         integer, intent(in) :: n
+         real(dp), dimension(:), intent(out) :: x ! output
+         integer, intent(out) :: ierr
+         real(dp) :: m
+         integer i
+         ierr = 0
+         sub(n) = 0d0
+         sup(n) = 0d0
+         bp(1) = diag(1)
+         vp(1) = x(1)
+         do i = 2,n
+            m = sub(i-1)/bp(i-1)
+            bp(i) = diag(i) - m*sup(i-1)
+            vp(i) = x(i) - m*vp(i-1)
+         end do
+         xp(n) = vp(n)/bp(n)
+         x(n) = xp(n)
+         do i = n-1, 1, -1
+            xp(i) = (vp(i) - sup(i)*xp(i+1))/bp(i)
+            x(i) = xp(i)
+         end do
+      end subroutine solve_tridiag_self
 
       
 !!! explicit part      
@@ -1466,7 +1548,7 @@
       
       subroutine mgmres ( &
             n, matvec, psolve, x, rhs, itr_max, mr, tol_abs, tol_rel, &
-            r, v, c, g, h, s, y )
+            r, v, c, g, h, s, y, ierr )
          integer, intent(in) :: n
          interface
             subroutine matvec(x, r) ! set r = A*x
@@ -1481,15 +1563,18 @@
          end interface
          real(dp), intent(inout) :: x(:) ! (n)   initial guess on input, result on output
          real(dp), intent(in) :: rhs(:) ! (n)
-         real(dp), intent(out), dimension(:) :: r, c, g, s, y
-         real(dp), intent(out), dimension(:,:) :: v, h
          integer, intent(in) :: itr_max, mr
          real(dp), intent(in) :: tol_abs, tol_rel
+         real(dp), intent(out), dimension(:) :: r, c, g, s, y
+         real(dp), intent(out), dimension(:,:) :: v, h
+         integer, intent(out) :: ierr
+
          real(dp) :: av, mu, rho, rho_tol, htmp
          integer :: i, itr, itr_used, j, k, k_copy
          real(dp), parameter :: delta = 1.0D-03
          logical, parameter :: verbose = .false.
          itr_used = 0
+         ierr = 0
          if ( n < mr ) then
             write ( *, '(a)' ) ' '
             write ( *, '(a)' ) 'MGMRES_ST - Fatal error!'
@@ -1502,7 +1587,7 @@
             call matvec ( x, r )
             !$omp simd
             do j=1,n
-               r(j) = rhs(j) - r(j)
+               r(j) = rhs(j) - r(j) ! residual = rhs - trial solution
             end do
             call psolve ( r ) ! apply pcond to residual
             rho = sqrt ( dot_product ( r(1:n), r(1:n) ) )
@@ -1591,6 +1676,7 @@
             write ( *, '(a)'       ) 'MGMRES:'
             write ( *, '(a,i8)'    ) '  Iterations = ', itr_used
             write ( *, '(a,g14.6)' ) '  Final residual = ', rho
+            stop 'MGMRES'
          end if
          
          contains
@@ -1749,7 +1835,7 @@
           1.0D+00, &
           1.0D+00, &
           1.0D+00 /)
-        integer :: seed = 123456789
+        integer :: seed = 123456789, ierr
         integer :: test
         real(dp) :: tol_abs
         real(dp) :: tol_rel
@@ -1808,7 +1894,8 @@
 
           call mgmres ( &
              n, ax, psolve, x_estimate, rhs, itr_max, mr, tol_abs, tol_rel, &
-             r, v, c, g, h, s, y )
+             r, v, c, g, h, s, y, ierr )
+          if (ierr /= 0) stop 'failed in mgmres'
 
           x_error = sqrt ( sum ( pow2( x_exact(1:n) - x_estimate(1:n) ) ) )
 
