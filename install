@@ -13,6 +13,8 @@ echo "# If this file contains only this line, install failed before math/test" >
 
 export BUILD_LOG="build.log"
 
+export MESA_TEST_SUITE_RESOLUTION_FACTOR=0.5
+
 # Get system info
 ./help > $BUILD_LOG  2>&1
 
