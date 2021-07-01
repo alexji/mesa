@@ -2,8 +2,6 @@
 
 # do_one [inlist] [output model] [LOGS directory]
 
-export MESA_TEST_SUITE_RESOLUTION_FACTOR=0.5
-
 function do_one {
 
     # set inlist for current part of multi-part test (optional)
