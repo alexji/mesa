@@ -41,9 +41,15 @@
       
       
       subroutine test_abtilu()
-         !call test_ILU_CR_mgmres_nvar2()
-         call test_abtilu_mgmres_nvar1()
-         call test_abtilu_mgmres_nvar2()
+         include 'formats'
+         integer :: j
+         do j=1,100
+            write(*,2) 'testing round', j
+            !call old_test_abtilu_mgmres_nvar1()
+            call test_abtilu_mgmres_nvar1()
+            !call old_test_abtilu_mgmres_nvar2()
+            call test_abtilu_mgmres_nvar2()
+         end do
          write(*,*)
          stop 'done test_abtilu'
       end subroutine test_abtilu
@@ -52,13 +58,13 @@
             nvar, nz, ublk, dblk, lblk, rhs1, &
             itr_max, mr, exact, tol_abs, tol_rel, &
             num_sweeps_factor, num_sweeps_solve, &
-            soln1, ierr)
+            soln1, verbose, ierr)
          integer, intent(in) :: nvar, nz, itr_max, mr, &
             num_sweeps_factor, num_sweeps_solve
          real(dp), dimension(:,:,:), intent(in) :: & !(nvar,nvar,nz)
             ublk, dblk, lblk
          real(dp), dimension(:), intent(in) :: rhs1 ! (neq)
-         logical, intent(in) :: exact
+         logical, intent(in) :: exact, verbose
          real(dp), intent(in) :: tol_abs, tol_rel
          real(dp), dimension(:), intent(inout) :: soln1 ! (neq)
             ! input: initial guess (can be 0)
@@ -83,7 +89,7 @@
          if (ierr /= 0) stop 'failed in create_preconditioner_abtilu_mgmres'
          call mgmres ( &     
             neq, matvec_abtilu_mgmres, solve_abtilu_mgmres, &
-            soln1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel )
+            soln1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel, verbose )
          
          contains
          
@@ -118,9 +124,6 @@
       end subroutine solve_with_mgmres
          
          
-         
-
-
 !*****************************************************************************
 !*****************************************************************************
 !
@@ -360,1254 +363,8 @@
          end subroutine set_z
          
       end subroutine solve_abtilu
-      
-      
-!*****************************************************************************
-!*****************************************************************************
-!
-!  testing abtilu
-!
-!*****************************************************************************
-!*****************************************************************************
-      
 
-      subroutine test_abtilu_mgmres_nvar1()
-      !
-      !    A = 
-      !      2  -1   0  0 
-      !     -1  2   -1  0 
-      !
-      !      0 -1    2 -1
-      !      0  0   -1  2 
-      !         
-         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
-         integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
-         real(dp), dimension(:,:,:), allocatable :: &
-            ublk, dblk, lblk
-         real(dp), dimension(:), allocatable :: &
-            soln1, rhs1, actual_soln1
-         integer :: test, i, k, mr, itr_max, shft, ierr, &
-            num_sweeps_factor, num_sweeps_solve
-         logical :: exact
-         real(dp) :: tol_abs, tol_rel, x_error, soln_error
-         include 'formats'
-         
-         mr = neq - 1
-         allocate( &
-            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
-            soln1(neq), rhs1(neq), actual_soln1(neq))
-         
-         call fill_with_NaNs(soln1)
-         call fill_with_NaNs(rhs1)
-         call fill_with_NaNs(actual_soln1)
-         call fill_with_NaNs_3D(ublk)
-         call fill_with_NaNs_3D(dblk)
-         call fill_with_NaNs_3D(lblk)
-         
-         ublk = -1d0     
-         dblk = 2d0
-         lblk = -1d0
-         
-         rhs1 = 1d0
-         soln1 = 0d0
-         actual_soln1 = (/ 2d0, 3d0, 3d0, 2d0 /)
-             
-         itr_max = 1 ! 20
-         tol_abs = 1.0D-08
-         tol_rel = 1.0D-08
 
-         num_sweeps_factor = 1
-         num_sweeps_solve = 3
-         !exact = .true.
-         exact = .false.
-
-         write ( *, '(a)' ) ' '
-         write ( *, '(a)' ) 'test_abtilu_mgmres_nvar1'
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-         
-         call solve_with_mgmres( &
-            nvar, nz, ublk, dblk, lblk, rhs1, &
-            itr_max, mr, exact, tol_abs, tol_rel, &
-            num_sweeps_factor, num_sweeps_solve, &
-            soln1, ierr)
-
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-         write ( *, '(a)' ) '  x:'
-         do i = 1, neq
-            write ( *, '(2x,i8,2x,g14.6)' ) i, soln1(i)
-         end do
-
-        contains
-        
-        real(dp) function norm2_of_diff(neq,a,b) result(v)
-           integer, intent(in) :: neq
-           real(dp), intent(in), dimension(:) :: a, b
-           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
-        end function norm2_of_diff
-        
-      end subroutine test_abtilu_mgmres_nvar1      
-      
-
-      subroutine test_abtilu_mgmres_nvar2()
-      !
-      !    A = 
-      !      2  0    0 -1    0  0    0  0   
-      !      0  2   -1  0    0  0    0  0  
-      !
-      !      0 -1    2  0    0  0    0  0 
-      !     -1  0    0  2   -1  0    0  0 
-      !
-      !      0  0    0 -1    2 -1    0  0 
-      !      0  0    0  0   -1  2   -1  0 
-      !
-      !      0  0    0  0    0 -1    2 -1 
-      !      0  0    0  0    0  0   -1  2 
-      !         
-         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
-         integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
-         real(dp), dimension(:,:,:), allocatable :: &
-            ublk, dblk, lblk
-         real(dp), dimension(:), allocatable :: &
-            soln1, rhs1, actual_soln1
-         integer :: test, i, k, mr, itr_max, shft, ierr, &
-            num_sweeps_factor, num_sweeps_solve
-         logical :: exact
-         real(dp) :: tol_abs, tol_rel, x_error, soln_error
-         include 'formats'
-         
-         mr = neq - 1
-         allocate( &
-            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
-            soln1(neq), rhs1(neq), actual_soln1(neq))
-         
-         call fill_with_NaNs(soln1)
-         call fill_with_NaNs(rhs1)
-         call fill_with_NaNs(actual_soln1)
-         call fill_with_NaNs_3D(ublk)
-         call fill_with_NaNs_3D(dblk)
-         call fill_with_NaNs_3D(lblk)
-         
-         ublk(1:2,1,1) = (/ 0d0, -1d0 /)
-         ublk(1:2,2,1) = (/ -1d0, 0d0 /)
-         ublk(1:2,1,2) = (/ 0d0, -1d0 /)
-         ublk(1:2,2,2) = (/ 0d0, 0d0 /)
-         ublk(1:2,1,3) = (/ 0d0, -1d0 /)
-         ublk(1:2,2,3) = (/ 0d0, 0d0 /)
-         ublk(:,:,4) = 0
-
-         dblk(1:2,1,1) = (/ 2d0, 0d0 /)
-         dblk(1:2,2,1) = (/ 0d0, 2d0 /)
-         dblk(1:2,1,2) = (/ 2d0, 0d0 /)
-         dblk(1:2,2,2) = (/ 0d0, 2d0 /)
-         dblk(1:2,1,3) = (/ 2d0, -1d0 /)
-         dblk(1:2,2,3) = (/ -1d0, 2d0 /)
-         dblk(1:2,1,4) = (/ 2d0, -1d0 /)
-         dblk(1:2,2,4) = (/ -1d0, 2d0 /)
-
-         lblk(:,:,1) = 0d0
-         lblk(1:2,1,2) = (/ 0d0, -1d0 /)
-         lblk(1:2,2,2) = (/ -1d0, 0d0 /)
-         lblk(1:2,1,3) = (/ 0d0, 0d0 /)
-         lblk(1:2,2,3) = (/ -1d0, 0d0 /)
-         lblk(1:2,1,4) = (/ 0d0, 0d0 /)
-         lblk(1:2,2,4) = (/ -1d0, 0d0 /)
-      
-         rhs1 = 1d0
-         soln1 = 0d0
-         actual_soln1 = (/ 3d0, 1d0, 1d0, 5d0, 6d0, 6d0, 5d0, 3d0 /)
-             
-         itr_max = 1 ! 20
-         mr = 3 ! nvar*nz - 1
-         tol_abs = 1.0D-08
-         tol_rel = 1.0D-08
-
-         num_sweeps_factor = 1
-         num_sweeps_solve = 3
-         !exact = .true.
-         exact = .false.
-
-         write ( *, '(a)' ) ' '
-         write ( *, '(a)' ) 'test_abtilu_mgmres_nvar2'
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-
-         ierr = 0
-         
-         call solve_with_mgmres( &
-            nvar, nz, ublk, dblk, lblk, rhs1, &
-            itr_max, mr, exact, tol_abs, tol_rel, &
-            num_sweeps_factor, num_sweeps_solve, &
-            soln1, ierr)
-
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-         write ( *, '(a)' ) '  x:'
-         do i = 1, neq
-            write ( *, '(2x,i8,2x,g14.6)' ) i, soln1(i)
-         end do
-
-        contains
-        
-        real(dp) function norm2_of_diff(neq,a,b) result(v)
-           integer, intent(in) :: neq
-           real(dp), intent(in), dimension(:) :: a, b
-           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
-        end function norm2_of_diff
-        
-      end subroutine test_abtilu_mgmres_nvar2     
-
-
-!*****************************************************************************
-!*****************************************************************************
-!
-!  testing sparse arrays
-!
-!*****************************************************************************
-!*****************************************************************************
-      
-
-      subroutine test_ILU_CR_mgmres_nvar1()
-      !
-      !    A = 
-      !      2 -1    0  0    
-      !     -1  2   -1  0    
-      !
-      !      0 -1    2 -1    
-      !      0  0   -1  2   
-      !      
-
-        integer, parameter :: n = 4
-        integer, parameter :: nz_num = 10
-        ! nonzero values are sorted by row
-        real(dp), dimension(nz_num) :: a = (/ &
-           2.0D+00,  -1.0D+00, & ! row 1
-           -1.0D+00,  2.0D+00, -1.0D+00, & ! row 2 
-           -1.0D+00,  2.0D+00, -1.0D+00, & ! row 3
-           -1.0D+00,  2.0D+00 /) ! row 4
-        ! JA stores the column index of the nonzero value
-        integer, dimension(nz_num) :: ja = (/ &
-          1, 2, & ! row 1
-          1, 2, 3, & ! row 2
-          2, 3, 4, & ! row 3
-          3, 4 /) ! row 4
-        ! the entries in A and JA that correspond to row I occur in indices
-        ! IA[I] through IA[I+1]-1.
-        integer, dimension(n+1) :: ia = (/ &
-          1, & ! row 1
-          3, & ! row 2
-          6, & ! row 3
-          9, & ! row 4
-          11  /)
-        integer :: i
-        integer :: itr_max          
-        integer :: mr
-        real(dp), dimension(n) :: rhs
-        integer :: test
-        real(dp) :: tol_abs
-        real(dp) :: tol_rel
-        real(dp) :: x_error, soln_error
-        real(dp) :: x_estimate(n)
-        real(dp), dimension(n) :: x_exact = (/ &
-          2d0, 3d0, 3d0, 2d0 /)
-        integer :: ua(n)
-        real(dp) :: l(nz_num+2) ! (ia(n+1)+1)
-        real(dp) :: Ax_for_soln(n), r(n), v(n,n)
-        
-        include 'formats'
-        
-        rhs = 1d0
-        
-        if (nz_num+2 /= ia(n+1)+1) then
-           stop 'bad counting test_ILU_CR_mgmres'
-        end if
-
-        write ( *, '(a)' ) ' '
-        write ( *, '(a)' ) 'test_ILU_CR_mgmres_nvar1'
-
-        do test = 1, 1 ! 2
-
-          x_estimate(1:n) = 0.0D+00
-
-          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
-
-          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-
-          itr_max = 20
-          mr = n - 1
-          tol_abs = 1.0D-08
-          tol_rel = 1.0D-08
-                    
-         call create_preconditioner_ILU_CR_mgmres()            
-         !write(*,*) ' call mgmres'
-         call mgmres( &     
-            n, matvec_ILU_CR_mgmres, apply_ILU_CR_mgmres, &
-            x_estimate, rhs, r, v, itr_max, mr, tol_abs, tol_rel )
-         call ax_cr ( n, nz_num, ia, ja, a, x_estimate, Ax_for_soln )
-
-          soln_error = sqrt ( sum ( ( rhs(1:n) - Ax_for_soln(1:n) )**2 ) )
-          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
-
-          write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-          write ( *, '(a)' ) '  x:'
-          do i = 1, n
-            write ( *, '(2x,i8,2x,g14.6)' ) i, x_estimate(i)
-          end do
-
-        end do
-
-        contains
-        
-        subroutine create_preconditioner_ILU_CR_mgmres()
-           call rearrange_cr ( n, nz_num, ia, ja, a )
-           call diagonal_pointer_cr ( n, nz_num, ia, ja, ua )
-           call ilu_cr ( n, nz_num, ia, ja, a, ua, l ) 
-        end subroutine create_preconditioner_ILU_CR_mgmres
-     
-        subroutine apply_ILU_CR_mgmres(x) ! apply preconditioner to x
-           real(dp), intent(inout) :: x(:) ! (neq)
-           include 'formats'
-           write(*,1) 'solve input', x
-           call lus_cr ( n, nz_num, ia, ja, l, ua, x, x ) 
-           write(*,1) 'solve output', x
-        end subroutine apply_ILU_CR_mgmres
-
-        subroutine matvec_ILU_CR_mgmres(x, r) ! set r = Jacobian*x
-           real(dp), intent(in) :: x(:) ! (neq)
-           real(dp), intent(out) :: r(:) ! (neq)
-           include 'formats'
-           write(*,1) 'matvec input', x(1:n)
-           call ax_cr ( n, nz_num, ia, ja, a, x, r ) 
-           write(*,1) 'matvec output', r(1:n)
-        end subroutine matvec_ILU_CR_mgmres
-        
-      end subroutine test_ILU_CR_mgmres_nvar1
-      
-
-      subroutine test_ILU_CR_mgmres_nvar2()
-      !
-      !    A = 
-      !      2  0    0 -1    0  0    0  0   
-      !      0  2   -1  0    0  0    0  0  
-      !
-      !      0 -1    2  0    0  0    0  0 
-      !     -1  0    0  2   -1  0    0  0 
-      !
-      !      0  0    0 -1    2 -1    0  0 
-      !      0  0    0  0   -1  2   -1  0 
-      !
-      !      0  0    0  0    0 -1    2 -1 
-      !      0  0    0  0    0  0   -1  2 
-      !
-
-        integer, parameter :: n = 8
-        integer, parameter :: nz_num = 20
-        ! nonzero values are sorted by row
-        real(dp), dimension(nz_num) :: a = (/ &
-           2.0D+00, -1.0D+00, & ! row 1
-           2.0D+00, -1.0D+00, & ! row 2 
-          -1.0D+00,  2.0D+00, & ! row 3
-          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 4
-          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 5
-          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 6
-          -1.0D+00,  2.0D+00, -1.0D+00, & ! row 7
-          -1.0D+00,  2.0D+00 /) ! row 8
-        ! JA stores the column index of the nonzero value
-        integer, dimension(nz_num) :: ja = (/ &
-          1, 4, & ! row 1
-          2, 3, & ! row 2
-          2, 3, & ! row 3
-          1, 4, 5, & ! row 4
-          4, 5, 6, & ! row 5
-          5, 6, 7, & ! row 6
-          6, 7, 8, & ! row 7
-          7, 8 /) ! row 8
-        ! the entries in A and JA that correspond to row I occur in indices
-        ! IA[I] through IA[I+1]-1.
-        integer, dimension(n+1) :: ia = (/ &
-          1, & ! row 1
-          3, & ! row 2
-          5, & ! row 3
-          7, & ! row 4
-          10, & ! row 5
-          13, & ! row 6
-          16, & ! row 7
-          19, & ! row 8
-          21  /)
-        integer :: i
-        integer :: itr_max          
-        integer :: mr
-        real(dp), dimension(n) :: rhs = (/ &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00, &
-          1.0D+00 /)
-        integer :: test
-        real(dp) :: tol_abs
-        real(dp) :: tol_rel
-        real(dp) :: x_error, soln_error
-        real(dp) :: x_estimate(n)
-        real(dp), dimension(n) :: x_exact = (/ &
-          3D+00, &
-          1D+00, &
-          1D+00, &
-          5D+00, &
-          6D+00, &
-          6D+00, &
-          5D+00, &
-          3D+00 /)
-        integer :: ua(n)
-        real(dp) :: l(nz_num+2) ! (ia(n+1)+1)
-        real(dp) :: Ax_for_soln(n), r(n), v(n,n)
-        
-        include 'formats'
-        
-        if (nz_num+2 /= ia(n+1)+1) then
-           stop 'bad counting test_ILU_CR_mgmres'
-        end if
-
-        write ( *, '(a)' ) ' '
-        write ( *, '(a)' ) 'test_ILU_CR_mgmres_nvar2'
-
-        do test = 1, 1 ! 2
-
-          x_estimate(1:n) = 0.0D+00
-
-          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
-
-          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-
-          itr_max = 20
-          mr = n - 1
-          tol_abs = 1.0D-08
-          tol_rel = 1.0D-08
-                    
-         call create_preconditioner_ILU_CR_mgmres()            
-         !write(*,*) ' call mgmres'
-         call mgmres ( &     
-            n, matvec_ILU_CR_mgmres, apply_ILU_CR_mgmres, &
-            x_estimate, rhs, r, v, itr_max, mr, tol_abs, tol_rel )
-         call ax_cr ( n, nz_num, ia, ja, a, x_estimate, Ax_for_soln )
-
-          soln_error = sqrt ( sum ( ( rhs(1:n) - Ax_for_soln(1:n) )**2 ) )
-          x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
-
-          write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-          write ( *, '(a)' ) '  x:'
-          do i = 1, n
-            write ( *, '(2x,i8,2x,g14.6)' ) i, x_estimate(i)
-          end do
-
-        end do
-
-        contains
-        
-        subroutine create_preconditioner_ILU_CR_mgmres()
-           !call rearrange_cr ( n, nz_num, ia, ja, a )
-           call diagonal_pointer_cr ( n, nz_num, ia, ja, ua )
-           call ilu_cr ( n, nz_num, ia, ja, a, ua, l ) 
-        end subroutine create_preconditioner_ILU_CR_mgmres
-     
-        subroutine apply_ILU_CR_mgmres(x) ! apply preconditioner to x
-           real(dp), intent(inout) :: x(:) ! (neq)
-           call lus_cr ( n, nz_num, ia, ja, l, ua, x, x ) 
-        end subroutine apply_ILU_CR_mgmres
-
-        subroutine matvec_ILU_CR_mgmres(x, r) ! set r = Jacobian*x
-           real(dp), intent(in) :: x(:) ! (neq)
-           real(dp), intent(out) :: r(:) ! (neq)
-           call ax_cr ( n, nz_num, ia, ja, a, x, r ) 
-        end subroutine matvec_ILU_CR_mgmres
-        
-      end subroutine test_ILU_CR_mgmres_nvar2
-      
-
-!*****************************************************************************
-!*****************************************************************************
-!
-!  support routines for sparse arrays
-!
-!*****************************************************************************
-!*****************************************************************************
-
-      
-      subroutine atx_cr ( n, nz_num, ia, ja, a, x, w )
-
-      !*****************************************************************************
-      !
-      !! ATX_CR computes A'*x for a matrix stored in sparse compressed row form.
-      !
-      !  Discussion:
-      !
-      !    The Sparse Compressed Row storage format is used.
-      !
-      !    The matrix A is assumed to be sparse.  To save on storage, only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA[I] through IA[I+1]-1.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    17 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.  The row vector has been compressed.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input, real(dp) :: X(N), the vector to be multiplied by A'.
-      !
-      !    Output, real(dp) :: W(N), the value of A'*X.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(n+1)
-        integer :: ja(nz_num)
-        integer :: k1
-        integer :: k2
-        real(dp) :: w(n)
-        real(dp) :: x(n)
-
-        w(1:n) = 0.0D+00
-
-        do i = 1, n
-          k1 = ia(i)
-          k2 = ia(i+1) - 1
-          w(ja(k1:k2)) = w(ja(k1:k2)) + a(k1:k2) * x(i)
-        end do
-
-        return
-      end subroutine atx_cr
-      
-      subroutine atx_st ( n, nz_num, ia, ja, a, x, w )
-
-      !*****************************************************************************
-      !
-      !! ATX_ST computes A'*x for a matrix stored in sparset triplet form.
-      !
-      !  Discussion:
-      !
-      !    The matrix A is assumed to be sparse.  To save on storage, only
-      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
-      !    entry in the matrix is stored by:
-      !
-      !      A(K) = value of entry,
-      !      IA(K) = row of entry,
-      !      JA(K) = column of entry.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    08 August 2006
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(NZ_NUM), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input, real(dp) :: X(N), the vector to be multiplied by A'.
-      !
-      !    Output, real(dp) :: W(N), the value of A'*X.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(nz_num)
-        integer :: j
-        integer :: ja(nz_num)
-        integer :: k
-        real(dp) :: w(n)
-        real(dp) :: x(n)
-
-        w(1:n) = 0.0D+00
-
-        do k = 1, nz_num
-          i = ia(k)
-          j = ja(k)
-          w(j) = w(j) + a(k) * x(i)
-        end do
-
-        return
-      end subroutine atx_st
-      
-      subroutine ax_cr ( n, nz_num, ia, ja, a, x, w )
-
-      !*****************************************************************************
-      !
-      !! AX_CR computes A*x for a matrix stored in sparse compressed row form.
-      !
-      !  Discussion:
-      !
-      !    The Sparse Compressed Row storage format is used.
-      !
-      !    The matrix A is assumed to be sparse.  To save on storage, only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA[I] through IA[I+1]-1.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    17 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.  The row vector has been compressed.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input, real(dp) :: X(N), the vector to be multiplied by A.
-      !
-      !    Output, real(dp) :: W(N), the value of A*X.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(n+1)
-        integer :: ja(nz_num)
-        integer :: k1
-        integer :: k2
-        real(dp) :: w(n)
-        real(dp) :: x(n)
-
-        w(1:n) = 0.0D+00
-
-        do i = 1, n
-          k1 = ia(i)
-          k2 = ia(i+1) - 1
-          w(i) = w(i) + dot_product ( a(k1:k2), x(ja(k1:k2)) )
-        end do
-
-        return
-      end subroutine ax_cr
-      
-      subroutine ax_st ( n, nz_num, ia, ja, a, x, w )
-
-      !*****************************************************************************
-      !
-      !! AX_ST computes A*x for a matrix stored in sparset triplet form.
-      !
-      !  Discussion:
-      !
-      !    The matrix A is assumed to be sparse.  To save on storage, only
-      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
-      !    entry in the matrix is stored by:
-      !
-      !      A(K) = value of entry,
-      !      IA(K) = row of entry,
-      !      JA(K) = column of entry.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    08 August 2006
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(NZ_NUM), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input, real(dp) :: X(N), the vector to be multiplied by A.
-      !
-      !    Output, real(dp) :: W(N), the value of A*X.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(nz_num)
-        integer :: j
-        integer :: ja(nz_num)
-        integer :: k
-        real(dp) :: w(n)
-        real(dp) :: x(n)
-
-        w(1:n) = 0.0D+00
-
-        do k = 1, nz_num
-          i = ia(k)
-          j = ja(k)
-          w(i) = w(i) + a(k) * x(j)
-        end do
-
-        return
-      end subroutine ax_st
-      
-      subroutine diagonal_pointer_cr ( n, nz_num, ia, ja, ua )
-
-      !*****************************************************************************
-      !
-      !! DIAGONAL_POINTER_CR finds diagonal entries in a sparse compressed row matrix.
-      !
-      !  Discussion:
-      !
-      !    The matrix A is assumed to be stored in compressed row format.  Only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA[I] through IA[I+1]-1.
-      !
-      !    The array UA can be used to locate the diagonal elements of the matrix.
-      !
-      !    It is assumed that every row of the matrix includes a diagonal element,
-      !    and that the elements of each row have been ascending sorted.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    18 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.  The row vector has been compressed.
-      !    On output, the order of the entries of JA may have changed because of
-      !    the sorting.
-      !
-      !    Output, integer :: UA(N), the index of the diagonal element
-      !    of each row.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        integer :: i
-        integer :: ia(n+1)
-        integer :: k
-        integer :: ja(nz_num)
-        integer :: ua(n)
-
-        ua(1:n) = -1
-
-        do i = 1, n
-          do k = ia(i), ia(i+1) - 1
-            if ( ja(k) == i ) then
-              ua(i) = k
-            end if
-          end do
-        end do
-
-        return
-      end subroutine diagonal_pointer_cr
-      
-      subroutine ilu_cr ( n, nz_num, ia, ja, a, ua, l )
-
-      !*****************************************************************************
-      !
-      !! ILU_CR computes the incomplete LU factorization of a matrix.
-      !
-      !  Discussion:
-      !
-      !    The matrix A is assumed to be stored in compressed row format.  Only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA(I) through IA(I+1)-1.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    27 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.  The row vector has been compressed.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input, integer :: UA(N), the index of the diagonal element
-      !    of each row.
-      !
-      !    Output, real(dp) :: L(NZ_NUM), the ILU factorization of A.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(n+1)
-        integer :: iw(n)
-        integer :: j
-        integer :: ja(nz_num)
-        integer :: jj
-        integer :: jrow
-        integer :: jw
-        integer :: k
-        real(dp) :: l(nz_num)
-        real(dp) :: tl
-        integer :: ua(n)
-        include 'formats'
-      !
-      !  Copy A.
-      !
-        l(1:nz_num) = a(1:nz_num)
-
-        do i = 1, n
-      !
-      !  IW points to the nonzero entries in row I.
-      !
-          iw(1:n) = -1
-
-          do k = ia(i), ia(i+1) - 1
-            iw(ja(k)) = k
-          end do
-
-          do j = ia(i), ia(i+1) - 1
-            jrow = ja(j)
-            if ( i <= jrow ) then
-              exit
-            end if
-            tl = l(j) * l(ua(jrow))
-            l(j) = tl
-            do jj = ua(jrow) + 1, ia(jrow+1) - 1
-              jw = iw(ja(jj))
-              if ( jw /= -1 ) then
-                l(jw) = l(jw) - tl * l(jj)
-              end if
-            end do
-          end do
-
-          ua(i) = j
-
-          if ( jrow /= i ) then
-            write ( *, '(a)' ) ' '
-            write ( *, '(a)' ) 'ILU_CR - Fatal error!'
-            write ( *, '(a)' ) '  JROW ~= I'
-            write ( *, '(a,i8)' ) '  JROW = ', jrow
-            write ( *, '(a,i8)' ) '  I    = ', i
-            stop
-          end if
-
-          if ( l(j) == 0.0D+00 ) then
-            write ( *, '(a)' ) ' '
-            write ( *, '(a)' ) 'ILU_CR - Fatal error!'
-            write ( *, '(a,i8)' ) '  Zero pivot on step I = ', i
-            write ( *, '(a,i8,a)' ) '  L(', j, ') = 0.0'
-            stop
-          end if
-
-          l(j) = 1.0D+00 / l(j)
-
-        end do
-
-        l(ua(1:n)) = 1.0D+00 / l(ua(1:n))
-        
-        write(*,1) 'sparse LU Dhat', l(ua(1:n))
-
-        return
-      end subroutine ilu_cr
-      
-      subroutine lus_cr ( n, nz_num, ia, ja, l, ua, r, z )
-
-      !*****************************************************************************
-      !
-      !! LUS_CR applies the incomplete LU preconditioner.
-      !
-      !  Discussion:
-      !
-      !    The linear system M * Z = R is solved for Z.  M is the incomplete
-      !    LU preconditioner matrix, and R is a vector supplied by the user.
-      !    So essentially, we're solving L * U * Z = R.
-      !
-      !    The matrix A is assumed to be stored in compressed row format.  Only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA(I) through IA(I+1)-1.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    18 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.  The row vector has been compressed.
-      !
-      !    Input, real(dp) :: L(NZ_NUM), the matrix values.
-      !
-      !    Input, integer :: UA(N), the index of the diagonal element
-      !    of each row.
-      !
-      !    Input, real(dp) :: R(N), the right hand side.
-      !
-      !    Output, real(dp) :: Z(N), the solution of the system M * Z = R.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        integer :: i
-        integer :: ia(n+1)
-        integer :: j
-        integer :: ja(nz_num)
-        real(dp) :: l(nz_num)
-        real(dp) :: r(n)
-        integer :: ua(n)
-        real(dp) :: w(n)
-        real(dp) :: z(n)
-      !
-      !  Copy R in.
-      !
-        w(1:n) = r(1:n)
-      !
-      !  Solve L * w = w where L is unit lower triangular.
-      !
-        do i = 2, n
-          do j = ia(i), ua(i) - 1
-            w(i) = w(i) - l(j) * w(ja(j))
-          end do
-        end do
-      !
-      !  Solve U * w = w, where U is upper triangular.
-      !
-        do i = n, 1, -1
-          do j = ua(i) + 1, ia(i+1) - 1
-            w(i) = w(i) - l(j) * w(ja(j))
-          end do
-          w(i) = w(i) / l(ua(i))
-        end do
-      !
-      !  Copy Z out.
-      !
-        z(1:n) = w(1:n)
-
-        return
-      end subroutine lus_cr
-      
-      subroutine rearrange_cr ( n, nz_num, ia, ja, a )
-
-      !*****************************************************************************
-      !
-      !! REARRANGE_CR sorts a sparse compressed row matrix.
-      !
-      !  Discussion:
-      !
-      !    This routine guarantees that the entries in the CR matrix
-      !    are properly sorted.
-      !
-      !    After the sorting, the entries of the matrix are rearranged in such
-      !    a way that the entries of each column are listed in ascending order
-      !    of their column values.
-      !
-      !    The matrix A is assumed to be stored in compressed row format.  Only
-      !    the nonzero entries of A are stored.  The vector JA stores the
-      !    column index of the nonzero value.  The nonzero values are sorted
-      !    by row, and the compressed row vector IA then has the property that
-      !    the entries in A and JA that correspond to row I occur in indices
-      !    IA(I) through IA(I+1)-1.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    17 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzeros.
-      !
-      !    Input, integer :: IA(N+1), the compressed row indices.
-      !
-      !    Input/output, integer :: JA(NZ_NUM), the column indices.
-      !    On output, these may have been rearranged by the sorting.
-      !
-      !    Input/output, real(dp) :: A(NZ_NUM), the matrix values.  On output,
-      !    the matrix values may have been moved somewhat because of the sorting.
-      !
-        implicit none
-
-        integer :: n
-        integer :: nz_num
-
-        real(dp) :: a(nz_num)
-        integer :: i
-        integer :: ia(n+1)
-        integer :: i4temp
-        integer :: ja(nz_num)
-        integer :: k
-        integer :: l
-        real(dp) :: r8temp
-
-        do i = 1, n
-
-          do k = ia(i), ia(i+1) - 2
-            do l = k + 1, ia(i+1) - 1
-
-              if ( ja(l) < ja(k) ) then
-                i4temp = ja(l)
-                ja(l)  = ja(k)
-                ja(k)  = i4temp
-
-                r8temp = a(l)
-                a(l)   = a(k)
-                a(k)   = r8temp
-              end if
-
-            end do
-          end do
-
-        end do
-
-        return
-      end subroutine rearrange_cr      
-
-      
 !*****************************************************************************
 !*****************************************************************************
 !
@@ -1851,7 +608,7 @@
       subroutine mgmres( &
             n, matvec, psolve, x, rhs, &
             r, v, & ! work
-            itr_max, mr, tol_abs, tol_rel )
+            itr_max, mr, tol_abs, tol_rel, verbose )
          integer, intent(in) :: n
          interface
             subroutine matvec(x, r) ! set r = A*x
@@ -1870,6 +627,7 @@
         real(dp), intent(out) :: v(:,:) ! (n,mr+1)
         integer, intent(in) :: itr_max, mr
         real(dp), intent(in) :: tol_abs, tol_rel
+        logical, intent(in) :: verbose
          
         ! locals
         real(dp) :: av
@@ -1888,7 +646,6 @@
         real(dp) :: rho
         real(dp) :: rho_tol
         real(dp) :: s(mr+1)
-        logical, parameter :: verbose = .true.
         real(dp) :: y(mr+1)
 
         itr_used = 0
@@ -1992,5 +749,494 @@
         
       end subroutine mgmres
       
+      
+!*****************************************************************************
+!*****************************************************************************
+!
+!  testing abtilu
+!
+!*****************************************************************************
+!*****************************************************************************
+      
+
+      subroutine test_abtilu_mgmres_nvar1()
+      !
+      !    A = 
+      !      2  -1   0  0 
+      !     -1  2   -1  0 
+      !
+      !      0 -1    2 -1
+      !      0  0   -1  2 
+      !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk
+         real(dp), dimension(:), allocatable :: &
+            soln1, rhs1, actual_soln1
+         integer :: test, i, k, mr, itr_max, shft, ierr, &
+            num_sweeps_factor, num_sweeps_solve
+         logical :: exact, verbose
+         real(dp) :: tol_abs, tol_rel, x_error, soln_error
+         include 'formats'
+         
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            soln1(neq), rhs1(neq), actual_soln1(neq))
+         
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(actual_soln1)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         
+         ublk = -1d0     
+         dblk = 2d0
+         lblk = -1d0
+         
+         rhs1 = 1d0
+         soln1 = 0d0
+         actual_soln1 = (/ 2d0, 3d0, 3d0, 2d0 /)
+             
+         itr_max = 1 ! 20
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
+
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+         verbose = .false.
+
+         !write ( *, '(a)' ) ' '
+         !write ( *, '(a)' ) 'test_abtilu_mgmres_nvar1'
+         x_error = norm2_of_diff(neq, actual_soln1, soln1)
+         !write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+         
+         call solve_with_mgmres( &
+            nvar, nz, ublk, dblk, lblk, rhs1, &
+            itr_max, mr, exact, tol_abs, tol_rel, &
+            num_sweeps_factor, num_sweeps_solve, &
+            soln1, verbose, ierr)
+
+         x_error = norm2_of_diff(neq, actual_soln1, soln1)
+         write ( *, '(a,g14.6)' ) '  test_abtilu_mgmres_nvar1 x=soln error ', x_error
+         if (x_error > 1d-12) stop 'bad x_error test_abtilu_mgmres_nvar1'
+         !write ( *, '(a)' ) '  x:'
+         !do i = 1, neq
+         !   write ( *, '(2x,i8,2x,g14.6)' ) i, soln1(i)
+         !end do
+
+        contains
+        
+        real(dp) function norm2_of_diff(neq,a,b) result(v)
+           integer, intent(in) :: neq
+           real(dp), intent(in), dimension(:) :: a, b
+           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
+        end function norm2_of_diff
+        
+      end subroutine test_abtilu_mgmres_nvar1      
+      
+
+      subroutine test_abtilu_mgmres_nvar2()
+      !
+      !    A = 
+      !      2  0    0 -1    0  0    0  0   
+      !      0  2   -1  0    0  0    0  0  
+      !
+      !      0 -1    2  0    0  0    0  0 
+      !     -1  0    0  2   -1  0    0  0 
+      !
+      !      0  0    0 -1    2 -1    0  0 
+      !      0  0    0  0   -1  2   -1  0 
+      !
+      !      0  0    0  0    0 -1    2 -1 
+      !      0  0    0  0    0  0   -1  2 
+      !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk
+         real(dp), dimension(:), allocatable :: &
+            soln1, rhs1, actual_soln1
+         integer :: test, i, k, mr, itr_max, shft, ierr, &
+            num_sweeps_factor, num_sweeps_solve
+         logical :: exact, verbose
+         real(dp) :: tol_abs, tol_rel, x_error, soln_error
+         include 'formats'
+         
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            soln1(neq), rhs1(neq), actual_soln1(neq))
+         
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(actual_soln1)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         
+         ublk(1:2,1,1) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,1) = (/ -1d0, 0d0 /)
+         ublk(1:2,1,2) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,2) = (/ 0d0, 0d0 /)
+         ublk(1:2,1,3) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,3) = (/ 0d0, 0d0 /)
+         ublk(:,:,4) = 0
+
+         dblk(1:2,1,1) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,1) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,2) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,2) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,3) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,3) = (/ -1d0, 2d0 /)
+         dblk(1:2,1,4) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,4) = (/ -1d0, 2d0 /)
+
+         lblk(:,:,1) = 0d0
+         lblk(1:2,1,2) = (/ 0d0, -1d0 /)
+         lblk(1:2,2,2) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,3) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,3) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,4) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,4) = (/ -1d0, 0d0 /)
+      
+         rhs1 = 1d0
+         soln1 = 0d0
+         actual_soln1 = (/ 3d0, 1d0, 1d0, 5d0, 6d0, 6d0, 5d0, 3d0 /)
+             
+         itr_max = 1 ! 20
+         mr = 3 ! nvar*nz - 1
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
+
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+         verbose = .false.
+
+         !write ( *, '(a)' ) ' '
+         !write ( *, '(a)' ) 'test_abtilu_mgmres_nvar2'
+         x_error = norm2_of_diff(neq, actual_soln1, soln1)
+         !write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
+         ierr = 0
+         
+         call solve_with_mgmres( &
+            nvar, nz, ublk, dblk, lblk, rhs1, &
+            itr_max, mr, exact, tol_abs, tol_rel, &
+            num_sweeps_factor, num_sweeps_solve, &
+            soln1, verbose, ierr)
+
+         x_error = norm2_of_diff(neq, actual_soln1, soln1)
+         write ( *, '(a,g14.6)' ) '  test_abtilu_mgmres_nvar2 x=soln error ', x_error
+         if (x_error > 1d-12) stop 'bad x_error test_abtilu_mgmres_nvar2'
+         !write ( *, '(a)' ) '  x:'
+         !do i = 1, neq
+         !   write ( *, '(2x,i8,2x,g14.6)' ) i, soln1(i)
+         !end do
+
+        contains
+        
+        real(dp) function norm2_of_diff(neq,a,b) result(v)
+           integer, intent(in) :: neq
+           real(dp), intent(in), dimension(:) :: a, b
+           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
+        end function norm2_of_diff
+        
+      end subroutine test_abtilu_mgmres_nvar2     
+
+
+
+
+      
+
+      subroutine old_test_abtilu_mgmres_nvar1()
+      !
+      !    A = 
+      !      2  -1   0  0 
+      !     -1  2   -1  0 
+      !
+      !      0 -1    2 -1
+      !      0  0   -1  2 
+      !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk, Dhat, invDhat, invDhat_lblk, invDhat_ublk
+         integer, allocatable :: ipiv(:,:)
+         real(dp), allocatable :: v(:,:)
+         real(dp), dimension(:), allocatable :: &
+            w1, x1, y1, xmgmres1, rhs1, soln1, r
+         integer :: test, i, k, mr, itr_max, shft, ierr, &
+            num_sweeps_factor, num_sweeps_solve
+         logical :: exact, verbose
+         real(dp) :: tol_abs, tol_rel, x_error, soln_error
+         include 'formats'
+         
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), &
+            invDhat_lblk(nvar,nvar,nz), invDhat_ublk(nvar,nvar,nz), &
+            w1(neq), x1(neq), y1(neq), xmgmres1(neq), rhs1(neq), soln1(neq), &
+            r(neq), v(neq,mr+1), ipiv(nvar,nz))
+         
+         call fill_with_NaNs(w1)
+         call fill_with_NaNs(x1)
+         call fill_with_NaNs(y1)
+         call fill_with_NaNs(xmgmres1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(r)
+         call fill_with_NaNs_2D(v)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         call fill_with_NaNs_3D(Dhat)
+         call fill_with_NaNs_3D(invDhat)
+         call fill_with_NaNs_3D(invDhat_lblk)
+         call fill_with_NaNs_3D(invDhat_ublk)
+         
+         ublk = -1d0     
+         dblk = 2d0
+         lblk = -1d0
+         
+         rhs1 = 1d0
+         soln1 = (/ 2d0, 3d0, 3d0, 2d0 /)
+             
+         itr_max = 1 ! 20
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
+
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+         verbose = .false.
+
+         write ( *, '(a)' ) ' '
+         write ( *, '(a)' ) 'old_test_abtilu_mgmres_nvar1'
+         xmgmres1 = 0d0
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         !write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
+         ierr = 0
+         call create_preconditioner_abtilu(ierr)     
+         if (ierr /= 0) stop 'failed in create_preconditioner_abtilu_mgmres'
+         call mgmres ( &     
+            neq, matvec_abtilu_mgmres, solve_abtilu_mgmres, &
+            xmgmres1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel, verbose )
+
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
+         if (x_error > 1d-12) stop 'bad x_error'
+         !write ( *, '(a)' ) '  x:'
+         !do i = 1, neq
+         !   write ( *, '(2x,i8,2x,g14.6)' ) i, xmgmres1(i)
+         !end do
+
+        contains
+        
+        real(dp) function norm2_of_diff(neq,a,b) result(v)
+           integer, intent(in) :: neq
+           real(dp), intent(in), dimension(:) :: a, b
+           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
+        end function norm2_of_diff
+        
+        subroutine create_preconditioner_abtilu(ierr)
+           integer, intent(out) :: ierr
+           include 'formats'
+           call factor_abtilu( &
+               nvar, nz, lblk, dblk, ublk, & ! input
+               num_sweeps_factor, exact, & ! input
+               Dhat, ipiv, & ! work
+               invDhat, invDhat_lblk, invDhat_ublk, ierr) ! output
+        end subroutine create_preconditioner_abtilu
+     
+        subroutine solve_abtilu_mgmres(v1)
+           real(dp), intent(inout) :: v1(:) ! (neq)
+           include 'formats'
+           call solve_abtilu( &
+               nvar, nz, invDhat, invDhat_lblk, invDhat_ublk, v1, & ! input
+               num_sweeps_solve, exact, & ! input
+               w1, x1, y1, & ! work
+               v1, ierr) ! output
+        end subroutine solve_abtilu_mgmres
+
+        subroutine matvec_abtilu_mgmres(b1, r1) ! set r = Jacobian*b
+           real(dp), intent(in) :: b1(:) ! (neq)
+           real(dp), intent(out) :: r1(:) ! (neq)
+           integer :: k
+           include 'formats'
+           call block_tridiag_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
+        end subroutine matvec_abtilu_mgmres
+        
+      end subroutine old_test_abtilu_mgmres_nvar1      
+      
+
+      subroutine old_test_abtilu_mgmres_nvar2()
+      !
+      !    A = 
+      !      2  0    0 -1    0  0    0  0   
+      !      0  2   -1  0    0  0    0  0  
+      !
+      !      0 -1    2  0    0  0    0  0 
+      !     -1  0    0  2   -1  0    0  0 
+      !
+      !      0  0    0 -1    2 -1    0  0 
+      !      0  0    0  0   -1  2   -1  0 
+      !
+      !      0  0    0  0    0 -1    2 -1 
+      !      0  0    0  0    0  0   -1  2 
+      !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk, Dhat, invDhat, invDhat_lblk, invDhat_ublk
+         integer, allocatable :: ipiv(:,:)
+         real(dp), allocatable :: v(:,:)
+         real(dp), dimension(:), allocatable :: &
+            w1, x1, y1, xmgmres1, rhs1, soln1, r
+         integer :: test, i, k, mr, itr_max, shft, ierr, &
+            num_sweeps_factor, num_sweeps_solve
+         logical :: exact, verbose
+         real(dp) :: tol_abs, tol_rel, x_error, soln_error
+         include 'formats'
+         
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), &
+            invDhat_lblk(nvar,nvar,nz), invDhat_ublk(nvar,nvar,nz), &
+            w1(neq), x1(neq), y1(neq), xmgmres1(neq), rhs1(neq), soln1(neq), &
+            r(neq), v(neq,mr+1), ipiv(nvar,nz))
+         
+         call fill_with_NaNs(w1)
+         call fill_with_NaNs(x1)
+         call fill_with_NaNs(y1)
+         call fill_with_NaNs(xmgmres1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(r)
+         call fill_with_NaNs_2D(v)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         call fill_with_NaNs_3D(Dhat)
+         call fill_with_NaNs_3D(invDhat)
+         call fill_with_NaNs_3D(invDhat_lblk)
+         call fill_with_NaNs_3D(invDhat_ublk)
+         
+         ublk(1:2,1,1) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,1) = (/ -1d0, 0d0 /)
+         ublk(1:2,1,2) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,2) = (/ 0d0, 0d0 /)
+         ublk(1:2,1,3) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,3) = (/ 0d0, 0d0 /)
+         ublk(:,:,4) = 0
+
+         dblk(1:2,1,1) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,1) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,2) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,2) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,3) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,3) = (/ -1d0, 2d0 /)
+         dblk(1:2,1,4) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,4) = (/ -1d0, 2d0 /)
+
+         lblk(:,:,1) = 0d0
+         lblk(1:2,1,2) = (/ 0d0, -1d0 /)
+         lblk(1:2,2,2) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,3) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,3) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,4) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,4) = (/ -1d0, 0d0 /)
+      
+         rhs1 = 1d0
+         soln1 = (/ 3d0, 1d0, 1d0, 5d0, 6d0, 6d0, 5d0, 3d0 /)
+             
+         itr_max = 1 ! 20
+         mr = 3 ! nvar*nz - 1
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
+
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+         verbose = .false.
+
+         write ( *, '(a)' ) ' '
+         write ( *, '(a)' ) 'old_test_abtilu_mgmres_nvar2'
+         xmgmres1 = 0d0
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         !write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
+         ierr = 0
+         call create_preconditioner_abtilu(ierr)     
+         if (ierr /= 0) stop 'failed in create_preconditioner_abtilu_mgmres'
+         call mgmres ( &     
+            neq, matvec_abtilu_mgmres, solve_abtilu_mgmres, &
+            xmgmres1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel, verbose )
+
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
+         if (x_error > 1d-12) stop 'bad x_error'
+         !write ( *, '(a)' ) '  x:'
+         !do i = 1, neq
+         !   write ( *, '(2x,i8,2x,g14.6)' ) i, xmgmres1(i)
+         !end do
+
+        contains
+        
+        real(dp) function norm2_of_diff(neq,a,b) result(v)
+           integer, intent(in) :: neq
+           real(dp), intent(in), dimension(:) :: a, b
+           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
+        end function norm2_of_diff
+        
+        subroutine create_preconditioner_abtilu(ierr)
+           integer, intent(out) :: ierr
+           include 'formats'
+           call factor_abtilu( &
+               nvar, nz, lblk, dblk, ublk, & ! input
+               num_sweeps_factor, exact, & ! input
+               Dhat, ipiv, & ! work
+               invDhat, invDhat_lblk, invDhat_ublk, ierr) ! output
+            if (nvar == 1) then
+               write(*,1) 'Dhat', Dhat
+            end if
+        end subroutine create_preconditioner_abtilu
+     
+        subroutine solve_abtilu_mgmres(v1)
+           real(dp), intent(inout) :: v1(:) ! (neq)
+           include 'formats'
+           !write(*,1) 'solve input', v1(1:neq)
+           call solve_abtilu( &
+               nvar, nz, invDhat, invDhat_lblk, invDhat_ublk, v1, & ! input
+               num_sweeps_solve, exact, & ! input
+               w1, x1, y1, & ! work
+               v1, ierr) ! output
+           !write(*,1) 'solve output', v1(1:neq)
+        end subroutine solve_abtilu_mgmres
+
+        subroutine matvec_abtilu_mgmres(b1, r1) ! set r = Jacobian*b
+           real(dp), intent(in) :: b1(:) ! (neq)
+           real(dp), intent(out) :: r1(:) ! (neq)
+           integer :: k
+           include 'formats'
+           !write(*,1) 'matvec input', b1(1:neq)
+           call block_tridiag_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
+           !write(*,1) 'matvec output', r1(1:neq)
+        end subroutine matvec_abtilu_mgmres
+        
+      end subroutine old_test_abtilu_mgmres_nvar2     
+
+
       
       end module abtilu
