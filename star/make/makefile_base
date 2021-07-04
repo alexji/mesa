@@ -196,6 +196,7 @@ SRCS = \
    evolve_support.f90 \
    star_bcyclic.f90 \
    solver_support.f90 \
+   abtilu.f90 \
    star_solver.f90 \
    struct_burn_mix.f90 \
    winds.f90 \
@@ -280,8 +281,8 @@ INCLUDE_OTHER = -I$(MOD_OTHER_DIR)
 STAR_INCLUDES = \
    $(INCLUDE_DEFAULTS) $(INCLUDE_JOB) $(INCLUDE_OTHER)
 
-COMPILE = $(COMPILE_TO_DEPLOY) $(FCfree) $(STAR_INCLUDES) 
-#COMPILE = $(COMPILE_TO_TEST) $(FCfree) $(STAR_INCLUDES)
+#COMPILE = $(COMPILE_TO_DEPLOY) $(FCfree) $(STAR_INCLUDES) 
+COMPILE = $(COMPILE_TO_TEST) $(FCfree) $(STAR_INCLUDES)
 
 #COMPILE = $(COMPILE_NO_OPENMP_NO_OPT) $(FCfree) $(STAR_INCLUDES)
 #COMPILE = $(COMPILE_TO_TEST) $(FCfree) $(FCwarn_unused) $(STAR_INCLUDES)

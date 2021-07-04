@@ -1006,6 +1006,7 @@
          logical, parameter :: dbg = .false.
          include 'formats'
          ierr = 0
+         get_tau_at_r = 0d0
          dtau = get_dtau1(s, ierr)
          if (ierr /= 0) return
          tau_00 = s% tau_factor*s% tau_base
