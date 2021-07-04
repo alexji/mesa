@@ -40,8 +40,9 @@
       
       
       subroutine test_abtilu()
-         call test_ILU_CR_mgmres_nvar1()
+         !call test_ILU_CR_mgmres_nvar2()
          call test_abtilu_mgmres_nvar1()
+         call test_abtilu_mgmres_nvar2()
          write(*,*)
          stop 'done test_abtilu'
       end subroutine test_abtilu
@@ -59,17 +60,16 @@
       subroutine factor_abtilu( &
             nvar, nz, lblk, dblk, ublk, & ! input
             num_sweeps, exact, & ! input
-            Dhat, ipiv, & ! work
-            invDhat, invDhat_lblk, invDhat_ublk, ierr) ! output
-         ! kashi pg 121, Algorithm 12, redone for block tridiagonal
+            Dhat, invDhat_ublk, ipiv, & ! work
+            invDhat, ierr) ! output
+         ! kashi phd thesis, pg 121, Algorithm 12, redone for block tridiagonal
          integer, intent(in) :: nvar, nz, num_sweeps
          real(dp), dimension(:,:,:), intent(in) :: & ! input (nvar,nvar,nz)
             lblk, dblk, ublk
          logical, intent(in) :: exact
-         real(dp), dimension(:,:,:), intent(out) :: Dhat ! work (nvar,nvar,nz)
+         real(dp), dimension(:,:,:), intent(out) :: Dhat, invDhat_ublk ! work (nvar,nvar,nz)
          integer, intent(out) :: ipiv(:,:) ! work (nvar,nz)
-         real(dp), dimension(:,:,:), intent(out) :: & ! output (nvar,nvar,nz)
-            invDhat, invDhat_lblk, invDhat_ublk
+         real(dp), dimension(:,:,:), intent(out) :: invDhat ! output (nvar,nvar,nz)
          integer, intent(out) :: ierr
          integer :: i, j, k, swp, op_err
          logical :: incomplete
@@ -93,8 +93,7 @@
 
          ! iteratively refine Dhat and invDhat (2:nz)
          do swp=1,num_sweeps 
-            ! Dhat(k) = dblk(k) - lblk(k-1)*invDhat(k-1)*ublk(k-1)
-            !$OMP PARALLEL DO PRIVATE(k) IF(incomplete)
+            !$OMP PARALLEL DO PRIVATE(k,op_err) IF(incomplete)
             do k = 2, nz
                call set_Dhat(k)
                if (exact) then
@@ -103,7 +102,6 @@
                end if
             end do
             !$OMP END PARALLEL DO 
-            !write(*,2) 'Dhat', swp, Dhat
             if (exact) exit
             !$OMP PARALLEL DO PRIVATE(k,op_err)
             do k = 2, nz  ! update invDhat for new Dhat
@@ -117,43 +115,17 @@
             end if  
          end do         
          
-         ! create matrix products that are useful for apply
-         !$OMP PARALLEL DO PRIVATE(k)
-         do k = 1, nz 
-            if (k > 1) then
-               call set_invDhat_lblk(k)
-            else
-               invDhat_lblk(:,:,k) = 0d0
-            end if
-            if (k < nz) then
-               call set_invDhat_ublk(k)
-            else
-               invDhat_ublk(:,:,k) = 0d0
-            end if
-         end do
-         !$OMP END PARALLEL DO  
-         
          contains
          
          subroutine set_Dhat(k)
             integer, intent(in) :: k
-            call set_invDhat_ublk(k-1)
-            ! Dhat(k) = dblk(k) - lblk(k)*invDhat_ublk(k-1)
             call copy_dblk_to_Dhat(k)
+            if (k == 1) return
+            ! invDhat_ublk(k-1) = invDhat(k-1)*ublk(k-1)
+            call mm_0(invDhat(:,:,k-1), ublk(:,:,k-1), invDhat_ublk(:,:,k-1)) ! c := a*b
+            ! Dhat(k) = dblk(k) - lblk(k)*invDhat_ublk(k-1)
             call mm_minus(lblk(:,:,k), invDhat_ublk(:,:,k-1), Dhat(:,:,k)) ! c := c - a*b
          end 
-         
-         subroutine set_invDhat_ublk(k)
-            integer, intent(in) :: k
-            ! invDhat_ublk(k) = invDhat(k)*ublk(k)
-            call mm_0(invDhat(:,:,k), ublk(:,:,k), invDhat_ublk(:,:,k)) ! c := a*b
-         end subroutine set_invDhat_ublk
-         
-         subroutine set_invDhat_lblk(k)
-            integer, intent(in) :: k
-            ! invDhat_ublk(k) = invDhat(k)*lblk(k)
-            call mm_0(invDhat(:,:,k), lblk(:,:,k), invDhat_lblk(:,:,k)) ! c := a*b
-         end subroutine set_invDhat_lblk
          
          subroutine copy_dblk_to_Dhat(k)
             integer, intent(in) :: k
@@ -180,34 +152,38 @@
       subroutine solve_abtilu( &
             nvar, nz, invDhat, lblk, ublk, b1, & ! input
             num_sweeps, exact, & ! input
-            x1, y1, & ! work
+            w1, x1, y1, & ! work
             z1, ierr) ! output
-         ! kashi pg 122, redone for block tridiagonal
+         ! kashi phd thesis, pg 122, redone for block tridiagonal
          integer, intent(in) :: nvar, nz, num_sweeps
          logical, intent(in) :: exact
          real(dp), dimension(:,:,:), intent(in) :: & ! input (nvar,nvar,nz)
             invDhat, lblk, ublk
          real(dp), intent(in) :: b1(:) ! input (nvar*nz)
          real(dp), dimension(:), intent(out) :: & ! (nvar*nz)
-            x1, y1, z1 ! output (nvar*nz)
+            w1, x1, y1, z1 ! output (nvar*nz)
          integer, intent(out) :: ierr
          logical :: incomplete
-         integer :: swp, j, k, neq
+         integer :: swp, j, k, neq, s00
          include 'formats'
          ierr = 0
          incomplete = .not. exact
          neq = nvar*nz
          
-         y1(:) = 0d0 ! initialize y to 0
+         !$OMP PARALLEL DO PRIVATE(k,s00)
+         do k=1,nz ! initialize y(k) = invDhat(k)*b(k)
+            s00 = (k-1)*nvar 
+            call mv_0(invDhat(:,:,k),b1(s00+1:s00+nvar),y1(s00+1:s00+nvar))
+         end do
+         !$OMP END PARALLEL DO  
          
-         do swp=1,num_sweeps         
+         do swp=1,num_sweeps
             ! analogous to forward elimination phase for tridiagonal solve
             !$OMP PARALLEL DO PRIVATE(k) IF(incomplete)
             do k=1,nz
                call set_y(k)
             end do
             !$OMP END PARALLEL DO  
-            !write(*,2) 'y1', swp, y1  
             if (exact) exit             
          end do
          
@@ -219,11 +195,10 @@
          do swp=1,num_sweeps               
             ! analogous to backward substitution phase for tridiagonal solve
             !$OMP PARALLEL DO PRIVATE(k) IF(incomplete)
-            do k=nz,1,-1
+            do k=nz,1,-1 ! ok parallel
                call set_z(k)
             end do
             !$OMP END PARALLEL DO   
-            !write(*,2) 'z1', swp, z1                
             if (exact) exit             
          end do
          
@@ -234,7 +209,7 @@
             integer :: s00, sm1, j
             s00 = (k-1)*nvar 
             sm1 = s00 - nvar
-            if (k == 1) then ! lblk(1) = 0
+            if (k == 1) then
                !$omp simd
                do j=1,nvar
                   x1(j) = b1(j)
@@ -251,7 +226,7 @@
          
          subroutine set_z(k) ! z(k) = y(k) - invDhat(k)*ublk(k)*z(k+1) eq 5.10
             integer, intent(in) :: k
-            integer :: j, s00, sp1
+            integer :: s00, sp1, j
             s00 = (k-1)*nvar
             sp1 = s00 + nvar
             if (k == nz) then
@@ -262,7 +237,7 @@
             else
                ! x(k) = ublk(k)*z(k+1); x(k) = invDhat*x(k); z(k) = y(k) - x(k)
                call mv_0(ublk(:,:,k),z1(sp1+1:sp1+nvar),x1(s00+1:s00+nvar))
-               call mv_self(invDhat(:,:,k),x1(s00+1:s00+nvar))
+               call mv_self(invDhat(:,:,k),x1(s00+1:s00+nvar),w1(s00+1:s00+nvar))
                !$omp simd
                do j=1,nvar
                   z1(s00+j) = y1(s00+j) - x1(s00+j)
@@ -291,19 +266,41 @@
       !      0 -1    2 -1
       !      0  0   -1  2 
       !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
          integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
-         real(dp), dimension(nvar,nvar,nz) :: &
-            ublk, dblk, lblk, Dhat, invDhat, &
-            Lhat, invDhat_lblk, invDhat_ublk
-         real(dp), dimension(nvar,nz) :: vec1, vec2, vec3
-         integer :: ipiv(nvar,nz)
-         real(dp), dimension(neq) :: w1, x1, y1, xmgmres1, rhs1, soln1
-         integer :: seed = 123456789
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk, Dhat, invDhat, wblk
+         integer, allocatable :: ipiv(:,:)
+         real(dp), allocatable :: v(:,:)
+         real(dp), dimension(:), allocatable :: &
+            w1, x1, y1, xmgmres1, rhs1, soln1, r
          integer :: test, i, k, mr, itr_max, shft, ierr, &
             num_sweeps_factor, num_sweeps_solve
          logical :: exact
          real(dp) :: tol_abs, tol_rel, x_error, soln_error
          include 'formats'
+         
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), wblk(nvar,nvar,nz), &
+            w1(neq), x1(neq), y1(neq), xmgmres1(neq), rhs1(neq), soln1(neq), &
+            r(neq), v(neq,mr+1), ipiv(nvar,nz))
+         
+         call fill_with_NaNs(w1)
+         call fill_with_NaNs(x1)
+         call fill_with_NaNs(y1)
+         call fill_with_NaNs(xmgmres1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(r)
+         call fill_with_NaNs_2D(v)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         call fill_with_NaNs_3D(Dhat)
+         call fill_with_NaNs_3D(invDhat)
+         call fill_with_NaNs_3D(wblk)
          
          ublk = -1d0     
          dblk = 2d0
@@ -312,34 +309,34 @@
          rhs1 = 1d0
          soln1 = (/ 2d0, 3d0, 3d0, 2d0 /)
              
-          itr_max = 1 ! 20
-          mr = neq - 1
-          tol_abs = 1.0D-08
-          tol_rel = 1.0D-08
-          
-          exact = .true.
-          num_sweeps_factor = nz ! for exact, need num_sweeps_factor = nz
-          num_sweeps_solve = nz ! 3
-             
-          write ( *, '(a)' ) ' '
-          write ( *, '(a)' ) 'test_abtilu_mgmres_nvar1'
-          xmgmres1 = 0d0
-          x_error = norm2_of_diff(neq, soln1, xmgmres1)
-          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-         
+         itr_max = 1 ! 20
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
+
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+
+         write ( *, '(a)' ) ' '
+         write ( *, '(a)' ) 'test_abtilu_mgmres_nvar1'
+         xmgmres1 = 0d0
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
          ierr = 0
          call create_preconditioner_abtilu(ierr)     
          if (ierr /= 0) stop 'failed in create_preconditioner_abtilu_mgmres'
          call mgmres ( &     
             neq, matvec_abtilu_mgmres, solve_abtilu_mgmres, &
-            xmgmres1, rhs1, itr_max, mr, tol_abs, tol_rel )
+            xmgmres1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel )
 
-          x_error = norm2_of_diff(neq, soln1, xmgmres1)
-          write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-          write ( *, '(a)' ) '  x:'
-          do i = 1, neq
-             write ( *, '(2x,i8,2x,g14.6)' ) i, xmgmres1(i)
-          end do
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
+         write ( *, '(a)' ) '  x:'
+         do i = 1, neq
+            write ( *, '(2x,i8,2x,g14.6)' ) i, xmgmres1(i)
+         end do
 
         contains
         
@@ -355,8 +352,8 @@
            call factor_abtilu( &
                nvar, nz, lblk, dblk, ublk, & ! input
                num_sweeps_factor, exact, & ! input
-               Dhat, ipiv, & ! work
-               invDhat, invDhat_lblk, invDhat_ublk, ierr) ! output
+               Dhat, wblk, ipiv, & ! work
+               invDhat, ierr) ! output
             if (nvar == 1) then
                write(*,1) 'Dhat', Dhat
             end if
@@ -365,13 +362,13 @@
         subroutine solve_abtilu_mgmres(v1)
            real(dp), intent(inout) :: v1(:) ! (neq)
            include 'formats'
-           write(*,1) 'solve input', v1(1:neq)
+           !write(*,1) 'solve input', v1(1:neq)
            call solve_abtilu( &
                nvar, nz, invDhat, lblk, ublk, v1, & ! input
                num_sweeps_solve, exact, & ! input
-               x1, y1, & ! work
+               w1, x1, y1, & ! work
                v1, ierr) ! output
-           write(*,1) 'solve output', v1(1:neq)
+           !write(*,1) 'solve output', v1(1:neq)
         end subroutine solve_abtilu_mgmres
 
         subroutine matvec_abtilu_mgmres(b1, r1) ! set r = Jacobian*b
@@ -379,9 +376,9 @@
            real(dp), intent(out) :: r1(:) ! (neq)
            integer :: k
            include 'formats'
-           write(*,1) 'matvec input', b1(1:neq)
+           !write(*,1) 'matvec input', b1(1:neq)
            call BTD_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
-           write(*,1) 'matvec output', r1(1:neq)
+           !write(*,1) 'matvec output', r1(1:neq)
         end subroutine matvec_abtilu_mgmres
         
       end subroutine test_abtilu_mgmres_nvar1      
@@ -402,102 +399,100 @@
       !      0  0    0  0    0 -1    2 -1 
       !      0  0    0  0    0  0   -1  2 
       !         
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
          integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
-         real(dp), dimension(nvar,nvar,nz) :: &
-            ublk, dblk, lblk, Dhat, &
-            Lhat, invDhat, invDhat_lblk, invDhat_ublk
-         real(dp), dimension(nvar,nz) :: vec1, vec2, vec3
-         integer :: ipiv(nvar,nz)
-         real(dp), dimension(neq) :: w1, x1, y1, rhs1, soln1
-         integer :: seed = 123456789
+         real(dp), dimension(:,:,:), allocatable :: &
+            ublk, dblk, lblk, Dhat, invDhat, wblk
+         integer, allocatable :: ipiv(:,:)
+         real(dp), allocatable :: v(:,:)
+         real(dp), dimension(:), allocatable :: &
+            w1, x1, y1, xmgmres1, rhs1, soln1, r
          integer :: test, i, k, mr, itr_max, shft, ierr, &
             num_sweeps_factor, num_sweeps_solve
          logical :: exact
          real(dp) :: tol_abs, tol_rel, x_error, soln_error
          include 'formats'
          
-         if (.false.) then ! identity matrix
-            
-            ublk = 0d0
-            lblk = 0d0
-            
-            dblk(1:2,1,1) = (/ 1d0, 0d0 /)
-            dblk(1:2,2,1) = (/ 0d0, 1d0 /)
-            dblk(1:2,1,2) = (/ 1d0, 0d0 /)
-            dblk(1:2,2,2) = (/ 0d0, 1d0 /)
-            dblk(1:2,1,3) = (/ 1d0, 0d0 /)
-            dblk(1:2,2,3) = (/ 0d0, 1d0 /)
-            dblk(1:2,1,4) = (/ 1d0, 0d0 /)
-            dblk(1:2,2,4) = (/ 0d0, 1d0 /)
+         mr = neq - 1
+         allocate( &
+            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
+            Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), wblk(nvar,nvar,nz), &
+            w1(neq), x1(neq), y1(neq), xmgmres1(neq), rhs1(neq), soln1(neq), &
+            r(neq), v(neq,mr+1), ipiv(nvar,nz))
+         
+         call fill_with_NaNs(w1)
+         call fill_with_NaNs(x1)
+         call fill_with_NaNs(y1)
+         call fill_with_NaNs(xmgmres1)
+         call fill_with_NaNs(rhs1)
+         call fill_with_NaNs(soln1)
+         call fill_with_NaNs(r)
+         call fill_with_NaNs_2D(v)
+         call fill_with_NaNs_3D(ublk)
+         call fill_with_NaNs_3D(dblk)
+         call fill_with_NaNs_3D(lblk)
+         call fill_with_NaNs_3D(Dhat)
+         call fill_with_NaNs_3D(invDhat)
+         call fill_with_NaNs_3D(wblk)
+         
+         ublk(1:2,1,1) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,1) = (/ -1d0, 0d0 /)
+         ublk(1:2,1,2) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,2) = (/ 0d0, 0d0 /)
+         ublk(1:2,1,3) = (/ 0d0, -1d0 /)
+         ublk(1:2,2,3) = (/ 0d0, 0d0 /)
+         ublk(:,:,4) = 0
 
-            rhs1 = 1d0
-            soln1 = 1d0
-         
-         else
-         
-            ublk(1:2,1,1) = (/ 0d0, -1d0 /)
-            ublk(1:2,2,1) = (/ -1d0, 0d0 /)
-            ublk(1:2,1,2) = (/ 0d0, -1d0 /)
-            ublk(1:2,2,2) = (/ 0d0, 0d0 /)
-            ublk(1:2,1,3) = (/ 0d0, -1d0 /)
-            ublk(1:2,2,3) = (/ 0d0, 0d0 /)
-            ublk(:,:,4) = 0
+         dblk(1:2,1,1) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,1) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,2) = (/ 2d0, 0d0 /)
+         dblk(1:2,2,2) = (/ 0d0, 2d0 /)
+         dblk(1:2,1,3) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,3) = (/ -1d0, 2d0 /)
+         dblk(1:2,1,4) = (/ 2d0, -1d0 /)
+         dblk(1:2,2,4) = (/ -1d0, 2d0 /)
 
-            dblk(1:2,1,1) = (/ 2d0, 0d0 /)
-            dblk(1:2,2,1) = (/ 0d0, 2d0 /)
-            dblk(1:2,1,2) = (/ 2d0, 0d0 /)
-            dblk(1:2,2,2) = (/ 0d0, 2d0 /)
-            dblk(1:2,1,3) = (/ 2d0, -1d0 /)
-            dblk(1:2,2,3) = (/ -1d0, 2d0 /)
-            dblk(1:2,1,4) = (/ 2d0, -1d0 /)
-            dblk(1:2,2,4) = (/ -1d0, 2d0 /)
+         lblk(:,:,1) = 0d0
+         lblk(1:2,1,2) = (/ 0d0, -1d0 /)
+         lblk(1:2,2,2) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,3) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,3) = (/ -1d0, 0d0 /)
+         lblk(1:2,1,4) = (/ 0d0, 0d0 /)
+         lblk(1:2,2,4) = (/ -1d0, 0d0 /)
+      
+         rhs1 = 1d0
+         soln1 = (/ 3d0, 1d0, 1d0, 5d0, 6d0, 6d0, 5d0, 3d0 /)
+             
+         itr_max = 1 ! 20
+         mr = 3 ! nvar*nz - 1
+         tol_abs = 1.0D-08
+         tol_rel = 1.0D-08
 
-            lblk(:,:,1) = 0d0
-            lblk(1:2,1,2) = (/ 0d0, -1d0 /)
-            lblk(1:2,2,2) = (/ -1d0, 0d0 /)
-            lblk(1:2,1,3) = (/ 0d0, 0d0 /)
-            lblk(1:2,2,3) = (/ -1d0, 0d0 /)
-            lblk(1:2,1,4) = (/ 0d0, 0d0 /)
-            lblk(1:2,2,4) = (/ -1d0, 0d0 /)
-         
-            rhs1 = 1d0
-            soln1 = (/ &
-                3d0, 1d0, &
-                1d0, 5d0, &
-                6d0, 6d0, &
-                5d0, 3d0 /)
-             
-         end if
-             
-          itr_max = 1 ! 20
-          mr = 3 ! nvar*nz - 1
-          tol_abs = 1.0D-08
-          tol_rel = 1.0D-08
-          
-          num_sweeps_factor = 1
-          num_sweeps_solve = 3
-          exact = .true.
-             
-          write ( *, '(a)' ) ' '
-          write ( *, '(a)' ) 'test_abtilu_mgmres_nvar2'
-          x1 = 0d0
-          x_error = norm2_of_diff(neq, soln1, x1)
-          write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
-         
+         num_sweeps_factor = 1
+         num_sweeps_solve = 3
+         !exact = .true.
+         exact = .false.
+
+         write ( *, '(a)' ) ' '
+         write ( *, '(a)' ) 'test_abtilu_mgmres_nvar2'
+         xmgmres1 = 0d0
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
+
          ierr = 0
          call create_preconditioner_abtilu(ierr)     
          if (ierr /= 0) stop 'failed in create_preconditioner_abtilu_mgmres'
          write(*,*) ' call mgmres'
          call mgmres ( &     
             neq, matvec_abtilu_mgmres, solve_abtilu_mgmres, &
-            x1, rhs1, itr_max, mr, tol_abs, tol_rel )
+            xmgmres1, rhs1, r, v, itr_max, mr, tol_abs, tol_rel )
 
-          x_error = norm2_of_diff(neq, soln1, x1)
-          write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
-          write ( *, '(a)' ) '  x:'
-          do i = 1, neq
-             write ( *, '(2x,i8,2x,g14.6)' ) i, x1(i)
-          end do
+         x_error = norm2_of_diff(neq, soln1, xmgmres1)
+         write ( *, '(a,g14.6)' ) '  x=soln error ', x_error
+         write ( *, '(a)' ) '  x:'
+         do i = 1, neq
+            write ( *, '(2x,i8,2x,g14.6)' ) i, xmgmres1(i)
+         end do
 
         contains
         
@@ -509,32 +504,37 @@
         
         subroutine create_preconditioner_abtilu(ierr)
            integer, intent(out) :: ierr
+           include 'formats'
            call factor_abtilu( &
                nvar, nz, lblk, dblk, ublk, & ! input
                num_sweeps_factor, exact, & ! input
-               Dhat, ipiv, & ! work
-               invDhat, invDhat_lblk, invDhat_ublk, ierr) ! output
+               Dhat, wblk, ipiv, & ! work
+               invDhat, ierr) ! output
+            if (nvar == 1) then
+               write(*,1) 'Dhat', Dhat
+            end if
         end subroutine create_preconditioner_abtilu
      
         subroutine solve_abtilu_mgmres(v1)
            real(dp), intent(inout) :: v1(:) ! (neq)
            include 'formats'
-           write(*,1) 'solve input', v1(1:neq)
+           !write(*,1) 'solve input', v1(1:neq)
            call solve_abtilu( &
                nvar, nz, invDhat, lblk, ublk, v1, & ! input
                num_sweeps_solve, exact, & ! input
-               x1, y1, & ! work
+               w1, x1, y1, & ! work
                v1, ierr) ! output
-           write(*,1) 'solve output', x1(1:neq)
+           !write(*,1) 'solve output', v1(1:neq)
         end subroutine solve_abtilu_mgmres
 
         subroutine matvec_abtilu_mgmres(b1, r1) ! set r = Jacobian*b
            real(dp), intent(in) :: b1(:) ! (neq)
            real(dp), intent(out) :: r1(:) ! (neq)
+           integer :: k
            include 'formats'
-           write(*,1) 'matvec input', b1(1:neq)
+           !write(*,1) 'matvec input', b1(1:neq)
            call BTD_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
-           write(*,1) 'matvec output', r1(1:neq)
+           !write(*,1) 'matvec output', r1(1:neq)
         end subroutine matvec_abtilu_mgmres
         
       end subroutine test_abtilu_mgmres_nvar2     
@@ -585,7 +585,6 @@
         integer :: itr_max          
         integer :: mr
         real(dp), dimension(n) :: rhs
-        integer :: seed = 123456789
         integer :: test
         real(dp) :: tol_abs
         real(dp) :: tol_rel
@@ -595,7 +594,7 @@
           2d0, 3d0, 3d0, 2d0 /)
         integer :: ua(n)
         real(dp) :: l(nz_num+2) ! (ia(n+1)+1)
-        real(dp) :: Ax_for_soln(n)
+        real(dp) :: Ax_for_soln(n), r(n), v(n,n)
         
         include 'formats'
         
@@ -610,17 +609,7 @@
 
         do test = 1, 1 ! 2
 
-          if ( test == 1 ) then
-
-            x_estimate(1:n) = 0.0D+00
-
-          else
-
-            write ( *, '(a)' ) '  Second try, use random initial vector:'
-
-            call r8vec_uniform_01 ( n, seed, x_estimate )
-
-          end if
+          x_estimate(1:n) = 0.0D+00
 
           x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
 
@@ -633,9 +622,9 @@
                     
          call create_preconditioner_ILU_CR_mgmres()            
          !write(*,*) ' call mgmres'
-         call mgmres ( &     
+         call mgmres( &     
             n, matvec_ILU_CR_mgmres, apply_ILU_CR_mgmres, &
-            x_estimate, rhs, itr_max, mr, tol_abs, tol_rel )
+            x_estimate, rhs, r, v, itr_max, mr, tol_abs, tol_rel )
          call ax_cr ( n, nz_num, ia, ja, a, x_estimate, Ax_for_soln )
 
           soln_error = sqrt ( sum ( ( rhs(1:n) - Ax_for_soln(1:n) )**2 ) )
@@ -739,7 +728,6 @@
           1.0D+00, &
           1.0D+00, &
           1.0D+00 /)
-        integer :: seed = 123456789
         integer :: test
         real(dp) :: tol_abs
         real(dp) :: tol_rel
@@ -756,7 +744,7 @@
           3D+00 /)
         integer :: ua(n)
         real(dp) :: l(nz_num+2) ! (ia(n+1)+1)
-        real(dp) :: Ax_for_soln(n)
+        real(dp) :: Ax_for_soln(n), r(n), v(n,n)
         
         include 'formats'
         
@@ -769,17 +757,7 @@
 
         do test = 1, 1 ! 2
 
-          if ( test == 1 ) then
-
-            x_estimate(1:n) = 0.0D+00
-
-          else
-
-            write ( *, '(a)' ) '  Second try, use random initial vector:'
-
-            call r8vec_uniform_01 ( n, seed, x_estimate )
-
-          end if
+          x_estimate(1:n) = 0.0D+00
 
           x_error = sqrt ( sum ( ( x_exact(1:n) - x_estimate(1:n) )**2 ) )
 
@@ -794,7 +772,7 @@
          !write(*,*) ' call mgmres'
          call mgmres ( &     
             n, matvec_ILU_CR_mgmres, apply_ILU_CR_mgmres, &
-            x_estimate, rhs, itr_max, mr, tol_abs, tol_rel )
+            x_estimate, rhs, r, v, itr_max, mr, tol_abs, tol_rel )
          call ax_cr ( n, nz_num, ia, ja, a, x_estimate, Ax_for_soln )
 
           soln_error = sqrt ( sum ( ( rhs(1:n) - Ax_for_soln(1:n) )**2 ) )
@@ -1500,99 +1478,6 @@
         return
       end subroutine lus_cr
       
-      subroutine r8vec_uniform_01 ( n, seed, r )
-
-      !*****************************************************************************
-      !
-      !! R8VEC_UNIFORM_01 returns a unit pseudorandom R8VEC.
-      !
-      !  Discussion:
-      !
-      !    An R8VEC is a vector of real(dp) :: values.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    05 July 2006
-      !
-      !  Author:
-      !
-      !    John Burkardt
-      !
-      !  Reference:
-      !
-      !    Paul Bratley, Bennett Fox, Linus Schrage,
-      !    A Guide to Simulation,
-      !    Second Edition,
-      !    Springer, 1987,
-      !    ISBN: 0387964673,
-      !    LC: QA76.9.C65.B73.
-      !
-      !    Bennett Fox,
-      !    Algorithm 647:
-      !    Implementation and Relative Efficiency of Quasirandom
-      !    Sequence Generators,
-      !    ACM Transactions on Mathematical Software,
-      !    Volume 12, Number 4, December 1986, pages 362-376.
-      !
-      !    Pierre L'Ecuyer,
-      !    Random Number Generation,
-      !    in Handbook of Simulation,
-      !    edited by Jerry Banks,
-      !    Wiley, 1998,
-      !    ISBN: 0471134031,
-      !    LC: T57.62.H37.
-      !
-      !    Peter Lewis, Allen Goodman, James Miller,
-      !    A Pseudo-Random Number Generator for the System/360,
-      !    IBM Systems Journal,
-      !    Volume 8, Number 2, 1969, pages 136-143.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the number of entries in the vector.
-      !
-      !    Input/output, integer :: SEED, the "seed" value, which
-      !    should NOT be 0.  On output, SEED has been updated.
-      !
-      !    Output, real(dp) :: R(N), the vector of pseudorandom values.
-      !
-        implicit none
-
-        integer :: n
-
-        integer :: i
-        integer :: k
-        integer :: seed
-        real(dp) :: r(n)
-
-        if ( seed == 0 ) then
-          write ( *, '(a)' ) ' '
-          write ( *, '(a)' ) 'R8VEC_UNIFORM_01 - Fatal error!'
-          write ( *, '(a)' ) '  Input value of SEED = 0.'
-          stop
-        end if
-
-        do i = 1, n
-
-          k = seed / 127773
-
-          seed = 16807 * ( seed - k * 127773 ) - k * 2836
-
-          if ( seed < 0 ) then
-            seed = seed + 2147483647
-          end if
-
-          r(i) = real ( seed, kind = 8 ) * 4.656612875D-10
-
-        end do
-
-        return
-      end subroutine r8vec_uniform_01
-      
       subroutine rearrange_cr ( n, nz_num, ia, ja, a )
 
       !*****************************************************************************
@@ -1743,16 +1628,33 @@
          real(dp), intent(in) :: blk(:,:) ! (nvar,nvar)
          real(dp), intent(out) :: blk_inv(:,:) ! (nvar,nvar)
          integer, intent(out) :: ipiv(:), ierr
+         integer :: i, j
          include 'formats'
+         do j=1,nvar
+            !$omp simd
+            do i=1,nvar
+               blk_inv(i,j) = blk(i,j)
+            end do
+         end do
+         call my_getf2(nvar, blk_inv, nvar, ipiv, ierr)
+         if (ierr /= 0) then
+            write(*,3) 'my_getf2 failed', k, ierr
+            stop 'm_inverse'
+         end if
+         call my_getri(nvar, blk_inv, ipiv, ierr)
+         if (ierr /= 0) then
+            write(*,3) 'my_getri failed', k, ierr
+            stop 'm_inverse'
+         end if         
+      end subroutine m_inverse
+      
+      subroutine my_getri(nvar, blk_inv, ipiv, ierr)
+         integer, intent(in) :: nvar
+         real(dp), intent(inout) :: blk_inv(:,:) ! (nvar,nvar)
+         integer, intent(in) :: ipiv(:)
+         integer, intent(out) :: ierr
          real(dp) :: work(nvar), binv(nvar,nvar)
          integer :: i, j, ip(nvar)
-         blk_inv = blk
-         call my_getf2(nvar, blk_inv, nvar, ipiv, ierr)
-         !call DGETRF(nvar, nvar, blk_inv, nvar, ipiv, ierr)
-         if (ierr /= 0) then
-            write(*,3) 'DGETRF failed', k, ierr
-            stop 'create_pcond'
-         end if
          !$omp simd
          do j=1,nvar
             ip(j) = ipiv(j)
@@ -1764,23 +1666,19 @@
             end do
          end do
          call DGETRI(nvar, binv, nvar, ip, work, nvar, ierr)
-         if (ierr /= 0) then
-            write(*,3) 'DGETRI failed', k, ierr
-            stop 'create_pcond'
-         end if         
          do j=1,nvar
             !$omp simd
             do i=1,nvar
                blk_inv(i,j) = binv(i,j)
             end do
          end do
-      end subroutine m_inverse
+      end subroutine my_getri
          
       subroutine mm_0(a, b, c) ! c := a*b, c different than b
          real(dp), dimension(:,:) :: a, b, c ! (nvar,nvar)
          integer :: j, i, nvar
-         nvar=size(a,dim=1)
          include 'formats'
+         nvar=size(a,dim=1)
          do j=1,nvar
             do i=1,nvar
                c(i,j) = 0d0
@@ -1825,23 +1723,21 @@
          end do      
       end subroutine mm_minus
 
-      subroutine mv_self(a,x) ! x = a*x
+      subroutine mv_self(a,x,wrk) ! x = a*x
          real(dp) :: a(:,:) ! (nvar,nvar)
-         real(dp) :: x(:) ! (nvar)
-         real(dp) :: tmp, temp(size(x,dim=1))
+         real(dp) :: x(:), wrk(:) ! (nvar)
          integer :: j, nvar
          nvar=size(a,dim=1)
          !$omp simd
          do j = 1,nvar
-            temp(j) = x(j)
+            wrk(j) = x(j)
          end do
-         call mv_0(a,temp,x) 
+         call mv_0(a,wrk,x) 
       end subroutine mv_self
 
       subroutine mv_0(a,x,y) ! y = a*x, y different than x
          real(dp) :: a(:,:) ! (nvar,nvar)
          real(dp) :: x(:), y(:) ! (nvar)
-         real(dp) :: tmp
          integer :: j, nvar
          nvar=size(a,dim=1)
          do j = 1,nvar
@@ -1933,8 +1829,11 @@
       !    ISBN: 0898715342,
       !    LC: QA188.S17.
       !
-      subroutine mgmres ( n, matvec, psolve, x, rhs, itr_max, mr, &
-              tol_abs, tol_rel )
+      subroutine mgmres( &
+            n, matvec, psolve, x, rhs, &
+            r, v, & ! work
+            itr_max, mr, tol_abs, tol_rel )
+         integer, intent(in) :: n
          interface
             subroutine matvec(x, r) ! set r = A*x
                use const_def, only: dp
@@ -1946,19 +1845,14 @@
                real(dp), intent(inout) :: x(:)
             end subroutine psolve
          end interface
-        integer :: n
-        real(dp) :: x(n)
-        real(dp) :: rhs(n)
-        integer :: itr_max
-        integer :: mr
-        real(dp) :: tol_abs
-        real(dp) :: tol_rel
+        real(dp), intent(inout) :: x(:) ! (n)
+        real(dp), intent(in) :: rhs(:) ! (n)
+        real(dp), intent(out) :: r(:) ! (n)
+        real(dp), intent(out) :: v(:,:) ! (n,mr+1)
+        integer, intent(in) :: itr_max, mr
+        real(dp), intent(in) :: tol_abs, tol_rel
          
         ! locals
-        real(dp) :: r(n)
-        !integer :: ua(n)
-        real(dp) :: v(n,mr+1);
-
         real(dp) :: av
         real(dp) :: c(mr+1)
         real(dp), parameter :: delta = 1.0D-03
