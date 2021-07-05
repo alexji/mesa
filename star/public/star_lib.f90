@@ -3269,37 +3269,6 @@
          use star_private_def, only: init_star_handles
          call init_star_handles()
       end subroutine star_init_star_handles
-      
-      
-      subroutine star_test_abtilu()
-         use abtilu, only: test_abtilu
-         call test_abtilu()
-      end subroutine star_test_abtilu
-      
-      
-      subroutine star_solve_with_mgmres( &
-            nvar, nz, ublk, dblk, lblk, rhs1, &
-            itr_max, mr, exact, tol_abs, tol_rel, &
-            num_sweeps_factor, num_sweeps_solve, &
-            soln1, verbose, ierr)
-         use abtilu, only: solve_with_mgmres
-         integer, intent(in) :: nvar, nz, itr_max, mr, &
-            num_sweeps_factor, num_sweeps_solve
-         real(dp), dimension(:,:,:), intent(in) :: & !(nvar,nvar,nz)
-            ublk, dblk, lblk
-         real(dp), dimension(:), intent(in) :: rhs1 ! (neq)
-         logical, intent(in) :: exact, verbose
-         real(dp), intent(in) :: tol_abs, tol_rel
-         real(dp), dimension(:), intent(inout) :: soln1 ! (neq)
-            ! input: initial guess (can be 0)
-            ! output: final approximation
-         integer, intent(out) :: ierr
-         call solve_with_mgmres( &
-            nvar, nz, ublk, dblk, lblk, rhs1, &
-            itr_max, mr, exact, tol_abs, tol_rel, &
-            num_sweeps_factor, num_sweeps_solve, &
-            soln1, verbose, ierr)
-      end subroutine star_solve_with_mgmres
-      
+
       
       end module star_lib

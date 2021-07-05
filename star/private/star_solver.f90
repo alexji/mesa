@@ -1019,6 +1019,39 @@
                end do
             end do
          end subroutine apply_coeff
+         
+         
+         subroutine test_solve_with_mgmres()
+            use abtilu, only: solve_with_mgmres
+            integer :: itr_max, mr, &
+               num_sweeps_factor, num_sweeps_solve
+            logical :: exact, verbose
+            real(dp) :: tol_abs, tol_rel
+            integer :: ierr
+            ierr = 0
+            mr = 3 ! 20
+            itr_max = 1 ! 20
+            tol_abs = 1d-8
+            tol_rel = 1d-8
+            num_sweeps_factor = 1
+            num_sweeps_solve = 3
+            exact = .true.
+            !exact = .false.
+            verbose = .true.
+         
+            !$omp simd
+            do i=1,neq
+               b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+            end do
+
+            call solve_with_mgmres( &            
+               nvar, nz, ublk, dblk, lblk, b1, &
+               itr_max, mr, exact, tol_abs, tol_rel, &
+               num_sweeps_factor, num_sweeps_solve, &
+               soln1, verbose, ierr)
+            stop 'testing solve_with_mgmres from star_solver'
+         
+         end subroutine test_solve_with_mgmres
 
 
          logical function solve_equ()
@@ -1030,6 +1063,12 @@
             include 'formats'
             ierr = 0
             solve_equ = .true.
+            
+            done = .false.
+            if (s% x_logical_ctrl(19)) then ! testing abtilu
+               call test_abtilu()
+               !call test_solve_with_mgmres()
+            end if
 
             if (s% doing_timing) then
                call start_time(s, time0, total_time)
@@ -1039,11 +1078,6 @@
             do i=1,neq
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
-            
-            done = .false.
-            if (s% x_logical_ctrl(19)) then ! testing abtilu
-               call test_abtilu()
-            end if
             
             if (.not. done) then
             

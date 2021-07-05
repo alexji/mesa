@@ -43,10 +43,10 @@
       subroutine test_abtilu()
          include 'formats'
          integer :: j
-         do j=1,100
-            write(*,2) 'testing round', j
-            call test_abtilu_mgmres_nvar1()
-            call test_abtilu_mgmres_nvar2()
+         do j=1,1
+            !write(*,2) 'testing round', j
+            !call test_abtilu_mgmres_nvar1(j)
+            call test_abtilu_mgmres_nvar2(j)
          end do
          write(*,*)
          stop 'done test_abtilu'
@@ -129,6 +129,107 @@
 !
 !*****************************************************************************
 !*****************************************************************************
+
+
+      subroutine get_diagonal_scaling_vectors( &
+            nvar, nz, lblk, dblk, ublk, & ! input
+            max_iters, eps, & ! input
+            DR, DC, & ! work
+            D1, D2, ierr) ! output
+         ! see Amestoy et al, 2008, A Parallel Matrix Scaling Algorithm
+         !   to solve A*x = b, 
+         !      instead solve (D1*A*D2)(D2^-1*x) = (D1*b)
+         !      Ahat = D1*A*D2
+         !      bhat = D1*b, 
+         !      solve Ahat*xhat = bhat
+         !      then x = D2*xhat
+         integer, intent(in) :: nvar, nz, max_iters
+         real(dp), intent(in) :: eps
+         real(dp), dimension(:,:,:), intent(in) :: & ! input (nvar,nvar,nz)
+            lblk, dblk, ublk
+         real(dp), dimension(:), intent(out) :: DR, DC ! work (nvar*nz)
+         real(dp), dimension(:), intent(out) :: D1, D2 ! output (nvar*nz)
+         integer, intent(out) :: ierr
+         integer :: iter, k, i, j, neq
+         logical :: row_converged, col_converged
+         include 'formats'
+         ierr = 0
+         neq = nvar*nz
+         D1(:) = 1d0
+         D2(:) = 1d0
+         do iter = 1, max_iters
+            !$OMP PARALLEL DO PRIVATE(k,i,j)
+            do k=1,nz
+               do i=1,nvar
+                  j = diag_index(i,k)
+                  DR(j) = row_max_abs(i,k)
+                  DC(j) = col_max_abs(i,k)
+                  D1(j) = D1(j)/sqrt(DR(j))
+                  D2(j) = D2(j)/sqrt(DC(j))
+               end do
+            end do
+            !$OMP END PARALLEL DO       
+            row_converged = abs(1d0 - maxval(D1(1:neq))) <= eps
+            if (row_converged) then
+               col_converged = abs(1d0 - maxval(D2(1:neq))) <= eps
+               if (col_converged) exit
+            end if
+         end do
+         
+         contains
+         
+         integer function diag_index(i,k) result(j)
+            integer, intent(in) :: i, k
+            j = (k-1)*nvar + i
+         end function diag_index
+         
+         real(dp) function row_max_abs(i,k)
+            integer, intent(in) :: i, k
+            integer :: s
+            real(dp) :: lmax = 0d0, dmax = 0d0, umax = 0d0
+            if (k > 1) then
+               s = (k-2)*nvar
+               do j=1,nvar
+                  lmax = max(lmax, abs(lblk(i,j,k))*D2(s+j))
+               end do
+            end if
+            if (k < nz) then
+               s = k*nvar
+               do j=1,nvar
+                  umax = max(umax, abs(ublk(i,j,k))*D2(s+j))
+               end do
+            end if
+            s = (k-1)*nvar
+            do j=1,nvar
+               dmax = max(dmax, abs(dblk(i,j,k))*D2(s+j))
+            end do
+            row_max_abs = D1(s+i)*max(lmax, dmax, umax)
+         end function row_max_abs
+         
+         real(dp) function col_max_abs(i,k)
+            integer, intent(in) :: i, k
+            integer :: s
+            real(dp) :: lmax = 0d0, dmax = 0d0, umax = 0d0
+            if (k > 1) then
+               s = (k-2)*nvar
+               do j=1,nvar
+                  lmax = max(lmax, D1(s+j)*abs(lblk(i,j,k)))
+               end do
+            end if
+            if (k < nz) then
+               s = k*nvar
+               do j=1,nvar
+                  umax = max(umax, D1(s+j)*abs(ublk(i,j,k)))
+               end do
+            end if
+            s = (k-1)*nvar
+            do j=1,nvar
+               dmax = max(dmax, D1(s+j)*abs(dblk(i,j,k)))
+            end do
+            col_max_abs = max(lmax, dmax, umax)*D2(s+i)
+         end function col_max_abs
+            
+      end subroutine get_diagonal_scaling_vectors
       
       
       subroutine factor_abtilu( &
@@ -152,6 +253,10 @@
          ierr = 0
          op_err = 0
          incomplete = .not. exact
+         
+         
+         ! optionally provide initial guess for Dhat.  chow-patel, section 2.3
+         ! e.g., Dhat from previous star solver newton iteration.
          
          ! initialize Dhat and invDhat (1:nz)
          !$OMP PARALLEL DO PRIVATE(k,op_err)
@@ -763,7 +868,7 @@
 !*****************************************************************************
       
 
-      subroutine test_abtilu_mgmres_nvar1()
+      subroutine test_abtilu_mgmres_nvar1(round)
       !
       !    A = 
       !      2  -1   0  0 
@@ -773,6 +878,7 @@
       !      0  0   -1  2 
       !         
          use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, intent(in) :: round
          integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
          real(dp), dimension(:,:,:), allocatable :: &
             ublk, dblk, lblk
@@ -826,7 +932,7 @@
             soln1, verbose, ierr)
 
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  test_abtilu_mgmres_nvar1 x=soln error ', x_error
+         write ( *, '(a,i4,g19.11)' ) '  test_abtilu_mgmres_nvar1 x=soln error ', round, x_error
          if (x_error > 1d-12) stop 'bad x_error test_abtilu_mgmres_nvar1'
          !write ( *, '(a)' ) '  x:'
          !do i = 1, neq
@@ -844,7 +950,7 @@
       end subroutine test_abtilu_mgmres_nvar1      
       
 
-      subroutine test_abtilu_mgmres_nvar2()
+      subroutine test_abtilu_mgmres_nvar2(round)
       !
       !    A = 
       !      2  0    0 -1    0  0    0  0   
@@ -860,6 +966,7 @@
       !      0  0    0  0    0  0   -1  2 
       !         
          use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         integer, intent(in) :: round
          integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
          real(dp), dimension(:,:,:), allocatable :: &
             ublk, dblk, lblk
@@ -923,10 +1030,7 @@
          exact = .false.
          verbose = .false.
 
-         !write ( *, '(a)' ) ' '
-         !write ( *, '(a)' ) 'test_abtilu_mgmres_nvar2'
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         !write ( *, '(a,g14.6)' ) '  Before solving, X_ERROR = ', x_error
 
          ierr = 0
          
@@ -937,12 +1041,13 @@
             soln1, verbose, ierr)
 
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         write ( *, '(a,g14.6)' ) '  test_abtilu_mgmres_nvar2 x=soln error ', x_error
+         write ( *, '(a,i4,g19.11)' ) '  test_abtilu_mgmres_nvar2 x=soln error ', round, x_error
          if (x_error > 1d-12) stop 'bad x_error test_abtilu_mgmres_nvar2'
-         !write ( *, '(a)' ) '  x:'
-         !do i = 1, neq
-         !   write ( *, '(2x,i8,2x,g14.6)' ) i, soln1(i)
-         !end do
+
+         if (round == 1) &
+            call write_MM( &
+               nvar, nz, ublk, dblk, lblk, rhs1, &
+               soln1, 'test_abtilu_mgmres_nvar2', ierr)
 
         contains
         
@@ -953,6 +1058,22 @@
         end function norm2_of_diff
         
       end subroutine test_abtilu_mgmres_nvar2     
+      
+      subroutine write_MM( &
+            nvar, nz, ublk, dblk, lblk, rhs1, &
+            soln1, filename, ierr)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:,:,:), intent(in) :: & !(nvar,nvar,nz)
+            ublk, dblk, lblk
+         real(dp), dimension(:), intent(in) :: rhs1 ! (neq)
+         real(dp), dimension(:), intent(in) :: soln1 ! (neq)
+         character (len=*), intent(in) :: filename
+         integer, intent(out) :: ierr
+         
+         write(*,*) 'write_MM'
+         ierr = 0
+         
+      end subroutine write_MM
 
       
       end module abtilu
