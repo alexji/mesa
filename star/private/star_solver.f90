@@ -1021,8 +1021,8 @@
          end subroutine apply_coeff
          
          
-         subroutine test_solve_with_mgmres()
-            use abtilu, only: solve_with_mgmres
+         subroutine test_solve_abtilu_with_mgmres()
+            use abtilu, only: solve_abtilu_with_mgmres
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
             logical :: exact, verbose
@@ -1044,14 +1044,14 @@
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
 
-            call solve_with_mgmres( &            
-               nvar, nz, ublk, dblk, lblk, b1, &
-               itr_max, mr, exact, tol_abs, tol_rel, &
-               num_sweeps_factor, num_sweeps_solve, &
-               soln1, verbose, ierr)
-            stop 'testing solve_with_mgmres from star_solver'
+            !call solve_abtilu_with_mgmres( &            
+            !   nvar, nz, ublk, dblk, lblk, b1, &
+            !   itr_max, mr, exact, tol_abs, tol_rel, &
+            !   num_sweeps_factor, num_sweeps_solve, &
+            !   soln1, verbose, ierr)
+            stop 'testing solve_abtilu_with_mgmres from star_solver'
          
-         end subroutine test_solve_with_mgmres
+         end subroutine test_solve_abtilu_with_mgmres
 
 
          logical function solve_equ()
@@ -1067,7 +1067,7 @@
             done = .false.
             if (s% x_logical_ctrl(19)) then ! testing abtilu
                call test_abtilu()
-               !call test_solve_with_mgmres()
+               !call test_solve_abtilu_with_mgmres()
             end if
 
             if (s% doing_timing) then
