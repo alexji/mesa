@@ -33,7 +33,7 @@
       implicit none
 
       private
-      public :: test_abtilu, solve_abtilu_with_mgmres
+      public :: test_abtilu, solve_abtilu_with_mgmres, show_vec
 
 
       contains      
@@ -49,6 +49,7 @@
          write(*,*)
          stop 'done test_abtilu'
       end subroutine test_abtilu
+      
       
       subroutine solve_abtilu_with_mgmres( &
             nvar, nz, ublk, dblk, lblk, rhs1, &
@@ -78,6 +79,7 @@
          include 'formats'
          ierr = 0
          neq = nvar*nz
+
          allocate( &
             Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), &
             invDhat_lblk(nvar,nvar,nz), invDhat_ublk(nvar,nvar,nz), &
@@ -104,15 +106,15 @@
             tol_abs, tol_rel, verbose )
          
          if (equilibrate) then ! scale soln1 with DC
-            if (verbose) then
-               write(*,*) 'scale soln1'
-               call show_vec(nvar, nz, soln1)
-            end if
             !$omp simd
             do j=1,neq
                soln1(j) = soln1(j)*DC(j)
             end do
-            if (verbose) call show_vec(nvar, nz, soln1)
+            if (verbose) then
+               write(*,*)
+               write(*,*) 'scaled soln1'
+               call show_vec(nvar, nz, soln1)
+            end if
          end if
          
          contains
@@ -158,57 +160,7 @@
 !*****************************************************************************
 !*****************************************************************************
 
-      
-      subroutine show_vec(nvar, nz, v)
-         integer, intent(in) :: nvar, nz
-         real(dp), dimension(:), intent(in) :: v ! neq
-         integer :: i, neq
-         include 'formats'
-         neq = nvar*nz
-         do i=1,neq
-            write(*,'(1x,f11.5)',advance='no') v(i)
-         end do
-         write(*,*)
-      end subroutine show_vec
-      
-      subroutine show_mtx(nvar, nz, lblk, dblk, ublk)
-         integer, intent(in) :: nvar, nz
-         real(dp), dimension(:,:,:), intent(in) :: lblk, dblk, ublk
-         integer :: i, j, k
-         include 'formats'
-         do k=1,nz ! block row k
-            if (k > 1) then ! space over
-               do i=1,k-1
-                  do j=1,nvar
-                     write(*,'(12x)',advance='no') 
-                  end do
-               end do
-            end if
-            do i=1,nvar ! row i of block k
-               if (k > 1) then ! show lblk row i of k
-                  do j=1,nvar
-                     write(*,'(1x,f11.5)',advance='no') lblk(i,j,k)
-                  end do
-               else ! space over
-                  do j=1,nvar
-                     write(*,'(12x)',advance='no') 
-                  end do
-               end if
-               ! show dblk row i of k
-               do j=1,nvar
-                  write(*,'(1x,f11.5)',advance='no') dblk(i,j,k)
-               end do
-               if (k < nz) then ! show ublk row i of k
-                  do j=1,nvar
-                     write(*,'(1x,f11.5)',advance='no') ublk(i,j,k)
-                  end do
-               end if
-               write(*,*) ! end of row j
-            end do
-         end do      
-      end subroutine show_mtx
-      
-      
+
       subroutine equilibrate_and_factor_abtilu( &
             nvar, nz, num_sweeps, equilibrate, exact, & ! input
             lblk, dblk, ublk, & ! input/output
@@ -339,7 +291,7 @@
          include 'formats'
          ierr = 0
         
-         ! Compute row scale factors
+         ! compute row scale factors
          !$OMP PARALLEL DO PRIVATE(k,i)
          do k=1,nz
             do i=1,nvar
@@ -348,7 +300,7 @@
          end do
          !$OMP END PARALLEL DO
          
-         ! Compute column scale factors assuming effect of DR
+         ! compute column scale factors assuming effect of DR
          !$OMP PARALLEL DO PRIVATE(k,i)
          do k=1,nz
             do i=1,nvar
@@ -513,7 +465,8 @@
             if (k == 1) return
             call set_invDhat_ublk(k-1)
             ! Dhat(k) = dblk(k) - lblk(k)*invDhat_ublk(k-1)
-            call mm_minus(lblk(:,:,k), invDhat_ublk(:,:,k-1), Dhat(:,:,k)) ! c := c - a*b            
+            call mm_minus( &
+               lblk(:,:,k), invDhat_ublk(:,:,k-1), Dhat(:,:,k)) ! c := c - a*b            
          end 
          
          subroutine copy_dblk_to_Dhat(k)
@@ -657,7 +610,65 @@
          
       end subroutine solve_abtilu
 
-
+      
+      subroutine show_vec(nvar, nz, v)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:), intent(in) :: v ! neq
+         character (len=256) :: fmt
+         integer :: i, k, neq
+         include 'formats'
+         fmt = '(1x,1pe11.4)'
+         do k=1,nz
+            do i=1,nvar
+               write(*,fmt,advance='no') v(i)
+            end do
+            write(*,'(2x)',advance='no') 
+         end do
+         write(*,*)
+      end subroutine show_vec
+      
+      
+      subroutine show_mtx(nvar, nz, lblk, dblk, ublk)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:,:,:), intent(in) :: lblk, dblk, ublk
+         integer :: i, j, k, n
+         character (len=256) :: fmt
+         fmt = '(1x,1pe11.4)'
+         include 'formats'
+         write(*,*) 'show_mtx'
+         do k=1,nz ! block row k
+            do i=1,nvar ! row i of block k
+               if (k > 2) then
+                  do n=1,k-2  
+                     do j=1,nvar
+                        write(*,'(12x)',advance='no') 
+                     end do
+                     write(*,'(2x)',advance='no') 
+                  end do
+               end if
+               if (k > 1) then ! show lblk row i of k
+                  do j=1,nvar
+                     write(*,fmt,advance='no') lblk(i,j,k)
+                  end do
+                  write(*,'(2x)',advance='no') 
+               end if
+               ! show dblk row i of k
+               do j=1,nvar
+                  write(*,fmt,advance='no') dblk(i,j,k)
+               end do
+               write(*,'(2x)',advance='no') 
+               if (k < nz) then ! show ublk row i of k
+                  do j=1,nvar
+                     write(*,fmt,advance='no') ublk(i,j,k)
+                  end do
+               end if
+               write(*,*) ! end of row j
+            end do
+            write(*,*)
+         end do      
+      end subroutine show_mtx
+      
+      
 !*****************************************************************************
 !*****************************************************************************
 !
@@ -962,6 +973,7 @@
           if ( verbose ) then
             write ( *, '(a,i4,a,g14.6)' ) '  ITR = ', itr, '  Residual = ', rho
           end if
+          if (rho == 0d0) exit ! can happen when form exact LU and exact apply
           if ( itr == 1 ) then
             rho_tol = rho * tol_rel
           end if
@@ -975,7 +987,7 @@
             call psolve ( v(1:n,k+1) ) ! apply to result of matvec
             av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
             if (is_bad(av)) then
-               write(*,*) 'bad result from matvec/psolve: is_bad(av)'
+               write(*,*) 'bad result from matvec/psolve: is_bad(av)', av
                stop 'mgmres'
             end if
             do j = 1, k
@@ -1010,7 +1022,7 @@
             rho = abs ( g(k+1) )
             itr_used = itr_used + 1
             if ( verbose ) then
-              write ( *, '(a,i4,a,g14.6)' ) '  K = ', k, '  Residual = ', rho
+              write ( *, '(a,i4,a,g14.6)' ) '    K = ', k, '  Residual = ', rho
             end if
             if ( rho <= rho_tol .and. rho <= tol_abs ) then
               exit
@@ -1058,6 +1070,67 @@
 !
 !*****************************************************************************
 !*****************************************************************************
+      
+      
+      subroutine get_lapack_solution( &
+            neq, A, rhs1, actual_soln1, verbose, ierr)
+         integer, intent(in) :: neq
+         real(dp), intent(inout) :: A(:,:), rhs1(:), actual_soln1(:)
+         logical, intent(in) :: verbose
+         integer, intent(out) :: ierr
+          character (len=1) :: fact, trans, equed
+          real(dp) :: rcond
+          integer, parameter :: nrhs = 1
+          real(dp) :: ain(neq,neq), af(neq,neq), b(neq,nrhs), x(neq,nrhs), &
+             r(neq), c(neq), ferr(nrhs), berr(nrhs), work(4*neq)
+          integer :: ipiv(neq), iwork(neq), i, j
+          fact = 'E' ! equilibrated and factored
+          trans = 'N' ! no transpose
+          equed = 'B' ! both row and column
+          ierr = 0
+          ain(1:neq,1:neq) = A(1:neq,1:neq)
+          b(1:neq,1) = rhs1(1:neq)
+          if (verbose) then
+            write(*,*) 'A'
+            do i=1,neq
+               do j=1,neq
+                  write(*,'(1x,f11.5)',advance='no') ain(i,j)
+               end do
+               write(*,*)
+            end do
+          end if
+          call DGESVX(fact, trans, neq, nrhs, ain, neq, af, neq, ipiv, &
+                      equed, r, c, b, neq, x, neq, rcond, ferr, berr, &
+                      work, iwork, ierr)
+         if (ierr /= 0) return
+         actual_soln1(1:neq) = x(1:neq,1)
+         if (verbose) then
+            write(*,*) 'equilibrated A'
+            do i=1,neq
+               do j=1,neq
+                  write(*,'(1x,f11.5)',advance='no') r(i)*ain(i,j)*c(j)
+               end do
+               write(*,*)
+            end do
+            write(*,*) 'actual_soln1'
+            do j=1,neq
+               write(*,'(1x,f26.16)',advance='no') actual_soln1(j)
+            end do
+            write(*,*)
+            write(*,*) 'r'
+            do j=1,neq
+               write(*,'(1x,f26.16)',advance='no') r(j)
+            end do
+            write(*,*)
+            write(*,*) 'c'
+            do j=1,neq
+               write(*,'(1x,f26.16)',advance='no') c(j)
+            end do
+            write(*,*)
+            write(*,*) 'rcond', rcond
+            write(*,*)
+         end if
+      end subroutine get_lapack_solution
       
 
       subroutine test_abtilu_mgmres_nvar1(round)
@@ -1159,66 +1232,6 @@
         end function norm2_of_diff
         
       end subroutine test_abtilu_mgmres_nvar1      
-        
-        subroutine get_lapack_solution( &
-              neq, A, rhs1, actual_soln1, verbose, ierr)
-           integer, intent(in) :: neq
-           real(dp), intent(inout) :: A(:,:), rhs1(:), actual_soln1(:)
-           logical, intent(in) :: verbose
-           integer, intent(out) :: ierr
-            character (len=1) :: fact, trans, equed
-            real(dp) :: rcond
-            integer, parameter :: nrhs = 1
-            real(dp) :: ain(neq,neq), af(neq,neq), b(neq,nrhs), x(neq,nrhs), &
-               r(neq), c(neq), ferr(nrhs), berr(nrhs), work(4*neq)
-            integer :: ipiv(neq), iwork(neq), i, j
-            fact = 'E' ! equilibrated and factored
-            trans = 'N' ! no transpose
-            equed = 'B' ! both row and column
-            ierr = 0
-            ain(1:neq,1:neq) = A(1:neq,1:neq)
-            b(1:neq,1) = rhs1(1:neq)
-            if (verbose) then
-              write(*,*) 'A'
-              do i=1,neq
-                 do j=1,neq
-                    write(*,'(1x,f11.5)',advance='no') ain(i,j)
-                 end do
-                 write(*,*)
-              end do
-            end if
-            call DGESVX(fact, trans, neq, nrhs, ain, neq, af, neq, ipiv, &
-                        equed, r, c, b, neq, x, neq, rcond, ferr, berr, &
-                        work, iwork, ierr)
-           if (ierr /= 0) return
-           actual_soln1(1:neq) = x(1:neq,1)
-           if (verbose) then
-              write(*,*) 'equilibrated A'
-              do i=1,neq
-                 do j=1,neq
-                    write(*,'(1x,f11.5)',advance='no') r(i)*ain(i,j)*c(j)
-                 end do
-                 write(*,*)
-              end do
-              write(*,*) 'actual_soln1'
-              do j=1,neq
-                 write(*,'(1x,f26.16)',advance='no') actual_soln1(j)
-              end do
-              write(*,*)
-              write(*,*) 'r'
-              do j=1,neq
-                 write(*,'(1x,f26.16)',advance='no') r(j)
-              end do
-              write(*,*)
-              write(*,*) 'c'
-              do j=1,neq
-                 write(*,'(1x,f26.16)',advance='no') c(j)
-              end do
-              write(*,*)
-              write(*,*) 'rcond', rcond
-              write(*,*)
-           end if
-        end subroutine get_lapack_solution
       
 
       subroutine test_abtilu_mgmres_nvar2(round)

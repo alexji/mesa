@@ -1022,33 +1022,80 @@
          
          
          subroutine test_solve_abtilu_with_mgmres()
-            use abtilu, only: solve_abtilu_with_mgmres
+            use abtilu, only: solve_abtilu_with_mgmres, show_vec
+            use star_bcyclic, only: bcyclic_factor, bcyclic_solve
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
-            logical :: exact, verbose
+            logical :: exact, verbose, equilibrate
             real(dp) :: tol_abs, tol_rel
-            integer :: ierr
+            integer :: ierr, nz_test, i
+            include 'formats'
             ierr = 0
-            mr = 3 ! 20
-            itr_max = 1 ! 20
+            mr = 5 ! 20
+            itr_max = 5 ! 20
             tol_abs = 1d-8
             tol_rel = 1d-8
             num_sweeps_factor = 1
             num_sweeps_solve = 3
-            exact = .true.
-            !exact = .false.
+            !exact = .true.
+            exact = .false.
             verbose = .true.
+            equilibrate = .true.
+            
+            nz_test = 4
+            
+            do i=1,nvar
+               write(*,2) trim(s% nameofvar(i)), i
+            end do
+
+            !$omp simd
+            do i = 1, nvar*nvar*nz
+               save_ublk1(i) = ublk1(i)
+               save_dblk1(i) = dblk1(i)
+               save_lblk1(i) = lblk1(i)
+            end do
          
             !$omp simd
             do i=1,neq
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
 
-            !call solve_abtilu_with_mgmres( &            
-            !   nvar, nz, ublk, dblk, lblk, b1, &
-            !   itr_max, mr, exact, tol_abs, tol_rel, &
-            !   num_sweeps_factor, num_sweeps_solve, &
-            !   soln1, verbose, ierr)
+            call solve_abtilu_with_mgmres( &            
+               nvar, nz_test, ublk, dblk, lblk, b1, &
+               equilibrate, exact, &
+               num_sweeps_factor, num_sweeps_solve, & ! for abtilu
+               itr_max, mr, tol_abs, tol_rel, & ! for mgmres
+               soln1, verbose, ierr)
+            if (ierr /= 0) stop 'solve_abtilu_with_mgmres failed'
+               
+            !$omp simd
+            do i = 1, nvar*nvar*nz
+               ublk1(i) = save_ublk1(i)
+               dblk1(i) = save_dblk1(i)
+               lblk1(i) = save_lblk1(i)
+            end do
+               
+            !$omp simd
+            do i=1,neq
+               b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+            end do
+            
+            call bcyclic_factor( &
+               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+               B1, row_scale_factors1, col_scale_factors1, &
+               equed1, iter, ierr)
+            if (ierr /= 0) stop 'bcyclic_factor failed'
+            
+            call bcyclic_solve( &
+               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+               b1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
+               iter, ierr)
+            if (ierr /= 0) stop 'bcyclic_solve failed'
+            
+            call show_vec(nvar, nz_test, soln1)
+            write(*,*) 'result from bcyclic'
+            write(*,*)
+               
             stop 'testing solve_abtilu_with_mgmres from star_solver'
          
          end subroutine test_solve_abtilu_with_mgmres
@@ -1066,8 +1113,8 @@
             
             done = .false.
             if (s% x_logical_ctrl(19)) then ! testing abtilu
-               call test_abtilu()
-               !call test_solve_abtilu_with_mgmres()
+               !call test_abtilu()
+               call test_solve_abtilu_with_mgmres()
             end if
 
             if (s% doing_timing) then
