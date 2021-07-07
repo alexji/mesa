@@ -44,8 +44,7 @@
       !terminal_interval = 1
       
       
-      !use_DGESVX_in_bcyclic = .true.
-      !use_equilibration_in_DGESVX = .true.
+      x_logical_ctrl(19) = .true. ! testing abtilu
       
 
       stop_for_bad_nums = .true.

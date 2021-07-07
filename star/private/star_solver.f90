@@ -1031,18 +1031,20 @@
             integer :: ierr, nz_test, i
             include 'formats'
             ierr = 0
-            mr = 5 ! 20
-            itr_max = 5 ! 20
+            mr = 10
+            itr_max = 20
             tol_abs = 1d-8
-            tol_rel = 1d-8
+            tol_rel = 1d-5
             num_sweeps_factor = 1
             num_sweeps_solve = 3
             !exact = .true.
             exact = .false.
             verbose = .true.
             equilibrate = .true.
+            !equilibrate = .false.
             
-            nz_test = 4
+            ! 105 ok, 110 bad
+            nz_test = 105
             
             do i=1,nvar
                write(*,2) trim(s% nameofvar(i)), i
@@ -1092,8 +1094,11 @@
                iter, ierr)
             if (ierr /= 0) stop 'bcyclic_solve failed'
             
-            call show_vec(nvar, nz_test, soln1)
-            write(*,*) 'result from bcyclic'
+            if (verbose .and. nz < 20) then
+               write(*,*)
+               call show_vec(nvar, nz, soln1)
+               write(*,*) 'bcyclic solution'
+            end if
             write(*,*)
                
             stop 'testing solve_abtilu_with_mgmres from star_solver'
@@ -1113,8 +1118,8 @@
             
             done = .false.
             if (s% x_logical_ctrl(19)) then ! testing abtilu
-               !call test_abtilu()
-               call test_solve_abtilu_with_mgmres()
+               call test_abtilu()
+               !call test_solve_abtilu_with_mgmres()
             end if
 
             if (s% doing_timing) then
