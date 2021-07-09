@@ -1022,7 +1022,7 @@
          
          
          subroutine test_solve_abtilu()
-            use abtilu, only: solve_abtilu, show_vec
+            use abtilu, only: solve_abtilu, show_vec, test_abtilu
             use star_bcyclic, only: bcyclic_factor, bcyclic_solve
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
@@ -1032,20 +1032,42 @@
             real(dp), allocatable :: A(:,:)
             include 'formats'
             ierr = 0
+
+            call test_abtilu(); return
+            
             mr = 30
             itr_max = 100
+            
             tol_abs = 1d-14
             tol_rel = 1d-14
-            num_sweeps_factor = 1
-            num_sweeps_solve = 3
+            
+            !tol_abs = 1d-12
+            !tol_rel = 1d-12
+            
             !debug = .true.
             debug = .false.
+            
             verbose = .true.
+            
             equilibrate = .true.
+            
             use_mgmres = .true.
+            !use_mgmres = .false.
+            
+            if (use_mgmres) then
+               num_sweeps_factor = 1 ! 1 is ok for mgmres
+            else
+               num_sweeps_factor = 3 ! Bi_CG_Stab needs 3 even for toy tests
+            end if
+            num_sweeps_solve = 3
+            
             use_A = .false.
             
+            
             nz_test = 500 ! 600 okay. 700 stalls. 
+            ! the following results are for left preconditioned.
+            ! 100 ok, but 200 fails for right.  weird.
+            ! with tol 1d-14
             ! 500  1 sweeps solve takes 44*30 + 30 tries
             ! 500  2 sweeps solve takes 27*30 + 20 tries
             ! 500  3 sweeps solve takes 24*30 + 12 tries
@@ -1130,7 +1152,6 @@
 
          logical function solve_equ()
             use star_utils, only: start_time, update_time
-            use abtilu, only: test_abtilu
             integer ::  i, k, ierr
             real(dp) :: ferr, berr, total_time
             logical :: done
@@ -1140,8 +1161,6 @@
             
             done = .false.
             if (s% x_logical_ctrl(19) .and. s% model_number == 2) then ! testing abtilu
-               !call test_abtilu()
-               !call test_star_solve_abtilu()
                call test_solve_abtilu()
             end if
 

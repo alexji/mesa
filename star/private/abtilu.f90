@@ -67,7 +67,7 @@
          real(dp), dimension(:,:), allocatable :: & ! (neq,neq) for debugging
             Acopy, AF_abtilu, AF_exact, A_temp, D, E, F, invD, F1, v
          real(dp), dimension(:), allocatable :: & ! (neq)
-            prev1, w1, x1, y1, r, DR, DC, check1_abtilu, check1_exact
+            prev1, u1, w1, x1, y1, r, DR, DC, check1_abtilu, check1_exact
          integer, allocatable :: ipiv(:,:) ! (nvar,nz)
          integer, dimension(:), allocatable :: & ! (nvar*nz)
             IPIV_AF_abtilu, IPIV_AF_exact
@@ -81,7 +81,7 @@
          allocate( &
             Dhat(nvar,nvar,nz), invDhat(nvar,nvar,nz), &
             invDhat_lblk(nvar,nvar,nz), invDhat_ublk(nvar,nvar,nz), &
-            Acopy(neq,neq), prev1(neq), w1(neq), x1(neq), y1(neq), r(neq), &            
+            Acopy(neq,neq), prev1(neq), u1(neq), w1(neq), x1(neq), y1(neq), r(neq), &            
             DR(neq), DC(neq), v(neq,mr+1), ipiv(nvar,nz))
          if (debug) allocate( &
             D(neq,neq), E(neq,neq), F(neq,neq), invD(neq,neq), &
@@ -128,7 +128,7 @@
             call mgmres( &     
                neq, matvec_abtilu, do_apply_abtilu, &
                soln1, rhs1, r, v, itr_max, mr, &
-               tol_abs, tol_rel, verbose, iters )
+               tol_abs, tol_rel, verbose, iters, ierr )
             if (ierr /= 0) then
                stop 'failed in mgmres'
             end if
@@ -213,22 +213,38 @@
             end if            
          end subroutine create_preconditioner_abtilu
      
-         subroutine do_apply_abtilu(r1, z1) ! set z = Precond*r
+         subroutine do_apply_abtilu(r1, z1, same) ! set z = Precond*r
             real(dp), intent(in) :: r1(:)
             real(dp), intent(out) :: z1(:)
-            integer :: j
+            logical, intent(in) :: same
+            integer :: j, k
             logical :: okay
             include 'formats'
-            z1 = r1
             if (debug .and. have_A) then
-               check1_exact = r1
+               !$omp simd
+               do k=1,neq
+                  check1_exact(k) = r1(k) 
+               end do
             end if
-            call apply_abtilu( &
-                nvar, nz, num_sweeps_solve, &
-                invDhat, invDhat_lblk, invDhat_ublk, lblk, ublk, r1, & ! input
-                DR, DC, equilibrate, & ! input
-                prev1, w1, x1, y1, & ! work
-                z1, verbose, ierr) ! output
+            if (same) then
+               !$omp simd
+               do k=1,neq
+                  u1(k) = r1(k) ! only necessary when same
+               end do
+               call apply_abtilu( &
+                   nvar, nz, num_sweeps_solve, &
+                   invDhat, invDhat_lblk, invDhat_ublk, lblk, ublk, u1, & ! input
+                   DR, DC, equilibrate, & ! input
+                   prev1, w1, x1, y1, & ! work
+                   z1, verbose, ierr) ! output
+            else
+               call apply_abtilu( &
+                   nvar, nz, num_sweeps_solve, &
+                   invDhat, invDhat_lblk, invDhat_ublk, lblk, ublk, r1, & ! input
+                   DR, DC, equilibrate, & ! input
+                   prev1, w1, x1, y1, & ! work
+                   z1, verbose, ierr) ! output
+            end if
             if (ierr /= 0) then
                stop 'failed in apply_abtilu'
             end if
@@ -263,12 +279,21 @@
             end do
          end function check_match            
 
-         subroutine matvec_abtilu(b1, r1) ! set r = Jacobian*b
+         subroutine matvec_abtilu(b1, r1, same) ! set r = Jacobian*b
             real(dp), intent(in) :: b1(:) ! (neq)
             real(dp), intent(out) :: r1(:) ! (neq)
+            logical, intent(in) :: same
             integer :: k
             include 'formats'
-            call block_tridiag_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
+            if (same) then
+               !$omp simd
+               do k=1,neq
+                  w1(k) = b1(k) ! only necessary when same
+               end do
+               call block_tridiag_mv1(nvar, nz, lblk, dblk, ublk, w1, r1)
+            else
+               call block_tridiag_mv1(nvar, nz, lblk, dblk, ublk, b1, r1)
+            end if
          end subroutine matvec_abtilu
          
       end subroutine solve_abtilu
@@ -976,220 +1001,65 @@
             end if
          end do
       end subroutine mv_minus
-
-
-!*****************************************************************************
-!*****************************************************************************
-!
-!  MGMRES
-!
-!*****************************************************************************
-!*****************************************************************************
-
-      !*****************************************************************************
-      !
-      !  MGMRES applies restarted GMRES.   derived from Burkardt's MGMRES_ST
-      !
-      !  Discussion:
-      !
-      !    The linear system A*X=B is solved iteratively.
-      !
-      !    Thanks to Jesus Pueblas Sanchez-Guerra for supplying two
-      !    corrections to the code on 31 May 2007.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    13 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      subroutine mgmres( &
-            n, matvec, psolve, x, rhs, &
-            r, v, & ! work
-            itr_max, mr, tol_abs, tol_rel, verbose, iters )
-         integer, intent(in) :: n
-         interface
-            subroutine matvec(x, r) ! set r = A*x
-               use const_def, only: dp
-               real(dp), intent(in) :: x(:)
-               real(dp), intent(out) :: r(:)
-            end subroutine matvec
-            subroutine psolve(x,z) ! set z = Precond*x
-               use const_def, only: dp
-               real(dp), intent(in) :: x(:)
-               real(dp), intent(out) :: z(:)
-            end subroutine psolve
-         end interface
-        real(dp), intent(inout) :: x(:) ! (n)
-        real(dp), intent(in) :: rhs(:) ! (n)
-        real(dp), intent(out) :: r(:) ! (n)
-        real(dp), intent(out) :: v(:,:) ! (n,mr+1)
-        integer, intent(in) :: itr_max, mr
-        real(dp), intent(in) :: tol_abs, tol_rel
-        logical, intent(in) :: verbose
-        integer, intent(out) :: iters
-         
-        ! locals
-        real(dp) :: av
-        real(dp) :: c(mr+1)
-        real(dp), parameter :: delta = 1.0D-03
-        real(dp) :: g(mr+1)
-        real(dp) :: h(mr+1,mr)
-        real(dp) :: htmp
-        integer :: i
-        integer :: itr
-        integer :: j
-        integer :: k
-        integer :: k_copy
-        real(dp) :: mu
-        real(dp) :: rho
-        real(dp) :: rho_tol
-        real(dp) :: s(mr+1)
-        real(dp) :: y(mr+1)
-
-        iters = 0
-        if ( verbose ) then
-          !write ( *, '(a,i4)' ) '  mgmres number of unknowns = ', n
-        end if
-        k_copy = 0
-        do itr = 1, itr_max
-          call matvec ( x, r )
-          r(1:n) = rhs(1:n) - r(1:n)
-          call psolve ( r, r ) ! apply to residual
-          rho = sqrt ( dot_product ( r, r ) )
-          if (rho == 0d0) exit ! can happen when form exact LU and exact apply
-          if ( itr == 1 ) then
-            rho_tol = rho * tol_rel
-          end if
-          if ( verbose ) then
-            write ( *, '(a,i4,a,3g14.6)' ) &
-               '  ITR = ', itr, '  Residual = ', rho, rho_tol, tol_abs
-          end if
-          v(1:n,1) = r(1:n) / rho
-          g(1) = rho
-          g(2:mr+1) = 0.0D+00
-          h(1:mr+1,1:mr) = 0.0D+00
-          do k = 1, mr
-            k_copy = k
-            call matvec ( v(1:n,k), v(1:n,k+1) )
-            call psolve ( v(1:n,k+1), v(1:n,k+1) ) ! apply to result of matvec
-            av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-            if (is_bad(av)) then
-               write(*,*) 'bad result from matvec/psolve: is_bad(av)', av
-               stop 'mgmres'
-            end if
-            do j = 1, k
-              h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
-              v(1:n,k+1) = v(1:n,k+1) - v(1:n,j) * h(j,k)
+      
+      subroutine copy_lower_to_square(nvar,nz,blk,s)
+         ! k > 1
+         ! ii = (k-2)*nvar + i
+         ! jj = (k-1)*nvar + j
+         ! s(ii,jj) = blk(i,j,k)
+         integer, intent(in) :: nvar, nz
+         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
+         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
+         integer :: k, i, j, ii, jj
+         do k=2,nz
+            ii = (k-1)*nvar
+            do i=1,nvar
+               jj = (k-2)*nvar
+               do j=1,nvar
+                  s(ii+i,jj+j) = blk(i,j,k)
+               end do
             end do
-            h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-            if ( ( av + delta * h(k+1,k)) == av ) then
-              do j = 1, k
-                htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
-                h(j,k) = h(j,k) + htmp
-                v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
-              end do
-              h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-            end if
-            if ( h(k+1,k) /= 0.0D+00 ) then
-              v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
-            end if
-            if ( 1 < k ) then
-              y(1:k+1) = h(1:k+1,k)
-              do j = 1, k - 1
-                call mult_givens ( c(j), s(j), j, y )
-              end do
-              h(1:k+1,k) = y(1:k+1)
-            end if
-            mu = sqrt ( h(k,k)**2 + h(k+1,k)**2 )
-            c(k) = h(k,k) / mu
-            s(k) = -h(k+1,k) / mu
-            h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
-            h(k+1,k) = 0.0D+00
-            call mult_givens ( c(k), s(k), k, g )
-            rho = abs ( g(k+1) )
-            iters = iters + 1
-            if ( verbose ) then
-              write ( *, '(a,i4,a,g14.6)' ) '    K = ', k, '  Residual = ', rho
-            end if
-            if ( rho <= rho_tol .and. rho <= tol_abs ) then
-              exit
-            end if
-          end do
-          k = k_copy - 1
-          y(k+1) = g(k+1) / h(k+1,k+1)
-          do i = k, 1, -1
-            y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
-          end do
-          do i = 1, n
-            x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
-          end do
-          if ( rho <= rho_tol .and. rho <= tol_abs ) then
-            exit
-          end if
-        end do
+         end do
+      end subroutine copy_lower_to_square
 
-        contains
-  
-        subroutine mult_givens ( c, s, k, g )
-          integer :: k
-          real(dp) :: c
-          real(dp) :: g(1:k+1)
-          real(dp) :: g1
-          real(dp) :: g2
-          real(dp) :: s
-
-          g1 = c * g(k) - s * g(k+1)
-          g2 = s * g(k) + c * g(k+1)
-
-          g(k)   = g1
-          g(k+1) = g2
-
-          return
-        end subroutine mult_givens
-        
-      end subroutine mgmres
+      subroutine copy_diag_to_square(nvar,nz,blk,s)         
+         ! ii = (k-1)*nvar + i
+         ! jj = (k-1)*nvar + j
+         ! s(ii,jj) = blk(i,j,k)
+         integer, intent(in) :: nvar, nz
+         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
+         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
+         integer :: k, i, j, ii, jj
+         do k=1,nz
+            ii = (k-1)*nvar
+            do i=1,nvar
+               jj = (k-1)*nvar
+               do j=1,nvar
+                  s(ii+i,jj+j) = blk(i,j,k)
+               end do
+            end do
+         end do
+      end subroutine copy_diag_to_square
       
-      
-!*****************************************************************************
-!*****************************************************************************
-!
-!  testing abtilu
-!
-!*****************************************************************************
-!*****************************************************************************
-
+      subroutine copy_upper_to_square(nvar,nz,blk,s)
+         ! k < nz
+         ! ii = k*nvar + i
+         ! jj = (k-1)*nvar + j
+         ! s(ii,jj) = blk(i,j,k)
+         integer, intent(in) :: nvar, nz
+         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
+         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
+         integer :: k, i, j, ii, jj
+         do k=1,nz
+            ii = (k-1)*nvar
+            do i=1,nvar
+               jj = k*nvar
+               do j=1,nvar
+                  s(ii+i,jj+j) = blk(i,j,k)
+               end do
+            end do
+         end do
+      end subroutine copy_upper_to_square
       
       subroutine write_MM_mxt( &
             nvar, nz, ublk, dblk, lblk, filename)
@@ -1251,7 +1121,6 @@
          
       end subroutine write_MM_mxt
 
-      
       subroutine write_MM_vec(nvar, nz, b1, filename)
          integer, intent(in) :: nvar, nz
          real(dp), dimension(:), intent(in) :: b1 ! (nvar*nz)
@@ -1307,6 +1176,499 @@
          end subroutine do1
          
       end subroutine write_MM_vec
+
+
+!*****************************************************************************
+!*****************************************************************************
+!
+!  MGMRES
+!
+!*****************************************************************************
+!*****************************************************************************
+
+      !*****************************************************************************
+      !
+      !  MGMRES applies restarted GMRES.   derived from Burkardt's MGMRES_ST
+      !
+      !  Discussion:
+      !
+      !    The linear system A*X=B is solved iteratively.
+      !
+      !    Thanks to Jesus Pueblas Sanchez-Guerra for supplying two
+      !    corrections to the code on 31 May 2007.
+      !
+      !  Licensing:
+      !
+      !    This code is distributed under the GNU LGPL license.
+      !
+      !  Modified:
+      !
+      !    13 July 2007
+      !
+      !  Author:
+      !
+      !    Original C version by Lili Ju.
+      !    FORTRAN90 version by John Burkardt.
+      !
+      !  Reference:
+      !
+      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
+      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
+      !    Charles Romine, Henk van der Vorst,
+      !    Templates for the Solution of Linear Systems:
+      !    Building Blocks for Iterative Methods,
+      !    SIAM, 1994.
+      !    ISBN: 0898714710,
+      !    LC: QA297.8.T45.
+      !
+      !    Tim Kelley,
+      !    Iterative Methods for Linear and Nonlinear Equations,
+      !    SIAM, 2004,
+      !    ISBN: 0898713528,
+      !    LC: QA297.8.K45.
+      !
+      !    Yousef Saad,
+      !    Iterative Methods for Sparse Linear Systems,
+      !    Second Edition,
+      !    SIAM, 2003,
+      !    ISBN: 0898715342,
+      !    LC: QA188.S17.
+      !
+      subroutine mgmres( &
+            n, matvec, psolve, x, rhs, &
+            r, v, & ! work
+            itr_max, mr, tol_abs, tol_rel, verbose, iters, ierr )
+         ! ierr = 0 ok
+         ! ierr = -1 failed to find a solution. reached max_iter.
+         integer, intent(in) :: n
+         interface
+            subroutine matvec(x, r, same) ! set r = A*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: r(:)
+               logical, intent(in) :: same
+            end subroutine matvec
+            subroutine psolve(x, z, same) ! set z = Precond*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: z(:)
+               logical, intent(in) :: same
+            end subroutine psolve
+         end interface
+        real(dp), intent(inout) :: x(:) ! (n)
+        real(dp), intent(in) :: rhs(:) ! (n)
+        real(dp), intent(out) :: r(:) ! (n)
+        real(dp), intent(out) :: v(:,:) ! (n,mr+1)
+        integer, intent(in) :: itr_max, mr
+        real(dp), intent(in) :: tol_abs, tol_rel
+        logical, intent(in) :: verbose
+        integer, intent(out) :: iters, ierr
+        call mgmres_left( & ! with ABTILU preconditioning, left is much better
+        !call mgmres_right( &
+            n, matvec, psolve, x, rhs, &
+            r, v, & ! work
+            itr_max, mr, tol_abs, tol_rel, verbose, iters, ierr )
+      end subroutine mgmres
+      
+      
+      subroutine mgmres_right( &
+            n, matvec, psolve, x, rhs, &
+            r, v, & ! work
+            itr_max, mr, tol_abs, tol_rel, verbose, iters, ierr )
+         ! ierr = 0 ok
+         ! ierr = -1 failed to find a solution. reached max_iter.
+         integer, intent(in) :: n
+         interface
+            subroutine matvec(x, r, same) ! set r = A*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: r(:)
+               logical, intent(in) :: same
+            end subroutine matvec
+            subroutine psolve(x, z, same) ! set z = Precond*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: z(:)
+               logical, intent(in) :: same
+            end subroutine psolve
+         end interface
+        real(dp), intent(inout) :: x(:) ! (n)
+        real(dp), intent(in) :: rhs(:) ! (n)
+        real(dp), intent(out) :: r(:) ! (n)
+        real(dp), intent(out) :: v(:,:) ! (n,mr+1)
+        integer, intent(in) :: itr_max, mr
+        real(dp), intent(in) :: tol_abs, tol_rel
+        logical, intent(in) :: verbose
+        integer, intent(out) :: iters, ierr
+         
+        real(dp), parameter :: delta = 1.0D-03
+        real(dp) :: av, c(mr+1), g(mr+1), h(mr+1,mr), &
+           htmp, mu, rho, rho_tol, s(mr+1), y(mr+1)
+        integer :: i, itr, j, k, k_copy
+
+        ierr = 0
+        iters = 0
+        k_copy = 0
+        do itr = 1, itr_max
+          call psolve ( x, r, .false. )
+          call matvec ( r, r, .true. )
+          r(1:n) = rhs(1:n) - r(1:n)
+          rho = sqrt ( dot_product ( r, r ) )
+          if (rho == 0d0) then   
+             exit ! can happen with exact LU and exact apply
+          end if
+          if ( itr == 1 ) then
+            rho_tol = rho * tol_rel
+          end if
+          if ( verbose ) then
+            write ( *, '(a,i4,a,3g14.6)' ) &
+               '  ITR = ', itr, '  Residual = ', rho, rho_tol, tol_abs
+          end if
+          v(1:n,1) = r(1:n) / rho
+          g(1) = rho
+          g(2:mr+1) = 0.0D+00
+          h(1:mr+1,1:mr) = 0.0D+00
+          do k = 1, mr
+            k_copy = k
+            call psolve( v(1:n,k), v(1:n,k+1), .false. )
+            call matvec( v(1:n,k+1), v(1:n,k+1), .true. ) 
+            av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            if (is_bad(av)) then
+               write(*,*) 'bad result from matvec/psolve: is_bad(av)', av
+               stop 'mgmres'
+            end if
+            do j = 1, k
+              h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
+              v(1:n,k+1) = v(1:n,k+1) - v(1:n,j) * h(j,k)
+            end do
+            h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            if ( ( av + delta * h(k+1,k)) == av ) then
+              do j = 1, k
+                htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
+                h(j,k) = h(j,k) + htmp
+                v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
+              end do
+              h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            end if
+            if ( h(k+1,k) /= 0.0D+00 ) then
+              v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
+            end if
+            if ( 1 < k ) then
+              y(1:k+1) = h(1:k+1,k)
+              do j = 1, k - 1
+                call mult_givens ( c(j), s(j), j, y )
+              end do
+              h(1:k+1,k) = y(1:k+1)
+            end if
+            mu = sqrt ( h(k,k)**2 + h(k+1,k)**2 )
+            c(k) = h(k,k) / mu
+            s(k) = -h(k+1,k) / mu
+            h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
+            h(k+1,k) = 0.0D+00
+            call mult_givens ( c(k), s(k), k, g )
+            rho = abs ( g(k+1) )
+            iters = iters + 1
+            if ( verbose ) then
+              write ( *, '(a,i4,a,g14.6)' ) '    K = ', k, '  Residual = ', rho
+            end if
+            if ( rho <= rho_tol .and. rho <= tol_abs ) then
+              exit
+            end if
+          end do
+          k = k_copy - 1
+          y(k+1) = g(k+1) / h(k+1,k+1)
+          do i = k, 1, -1
+            y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
+          end do
+          do i = 1, n
+            x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
+          end do
+          call psolve ( x, x, .true. )
+          if ( rho <= rho_tol .and. rho <= tol_abs ) return
+        end do
+        
+        ierr = -1
+
+        contains
+  
+        subroutine mult_givens ( c, s, k, g )
+          integer :: k
+          real(dp) :: c
+          real(dp) :: g(1:k+1)
+          real(dp) :: g1
+          real(dp) :: g2
+          real(dp) :: s
+
+          g1 = c * g(k) - s * g(k+1)
+          g2 = s * g(k) + c * g(k+1)
+
+          g(k)   = g1
+          g(k+1) = g2
+
+          return
+        end subroutine mult_givens
+        
+      end subroutine mgmres_right
+      
+      
+      subroutine mgmres_left( &
+            n, matvec, psolve, x, rhs, &
+            r, v, & ! work
+            itr_max, mr, tol_abs, tol_rel, verbose, iters, ierr )
+         ! ierr = 0 ok
+         ! ierr = -1 failed to find a solution. reached max_iter.
+         integer, intent(in) :: n
+         interface
+            subroutine matvec(x, r, same) ! set r = A*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: r(:)
+               logical, intent(in) :: same
+            end subroutine matvec
+            subroutine psolve(x, z, same) ! set z = Precond*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: z(:)
+               logical, intent(in) :: same
+            end subroutine psolve
+         end interface
+        real(dp), intent(inout) :: x(:) ! (n)
+        real(dp), intent(in) :: rhs(:) ! (n)
+        real(dp), intent(out) :: r(:) ! (n)
+        real(dp), intent(out) :: v(:,:) ! (n,mr+1)
+        integer, intent(in) :: itr_max, mr
+        real(dp), intent(in) :: tol_abs, tol_rel
+        logical, intent(in) :: verbose
+        integer, intent(out) :: iters, ierr
+         
+        real(dp), parameter :: delta = 1.0D-03
+        real(dp) :: av, c(mr+1), g(mr+1), h(mr+1,mr), &
+           htmp, mu, rho, rho_tol, s(mr+1), y(mr+1)
+        integer :: i, itr, j, k, k_copy
+
+        ierr = 0
+        iters = 0
+        k_copy = 0
+        do itr = 1, itr_max
+          call matvec ( x, r, .false. )
+          r(1:n) = rhs(1:n) - r(1:n)
+          call psolve ( r, r, .true. )
+          rho = sqrt ( dot_product ( r, r ) )
+          if (rho == 0d0) then   
+             exit ! can happen when form exact LU and exact apply
+          end if
+          if ( itr == 1 ) then
+            rho_tol = rho * tol_rel
+          end if
+          if ( verbose ) then
+            write ( *, '(a,i4,a,3g14.6)' ) &
+               '  ITR = ', itr, '  Residual = ', rho, rho_tol, tol_abs
+          end if
+          v(1:n,1) = r(1:n) / rho
+          g(1) = rho
+          g(2:mr+1) = 0.0D+00
+          h(1:mr+1,1:mr) = 0.0D+00
+          do k = 1, mr
+            k_copy = k
+            call matvec ( v(1:n,k), v(1:n,k+1), .false. )
+            call psolve ( v(1:n,k+1), v(1:n,k+1), .true. )
+            av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            if (is_bad(av)) then
+               write(*,*) 'bad result from matvec/psolve: is_bad(av)', av
+               stop 'mgmres'
+            end if
+            do j = 1, k
+              h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
+              v(1:n,k+1) = v(1:n,k+1) - v(1:n,j) * h(j,k)
+            end do
+            h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            if ( ( av + delta * h(k+1,k)) == av ) then
+              do j = 1, k
+                htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
+                h(j,k) = h(j,k) + htmp
+                v(1:n,k+1) = v(1:n,k+1) - htmp * v(1:n,j)
+              end do
+              h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
+            end if
+            if ( h(k+1,k) /= 0.0D+00 ) then
+              v(1:n,k+1) = v(1:n,k+1) / h(k+1,k)
+            end if
+            if ( 1 < k ) then
+              y(1:k+1) = h(1:k+1,k)
+              do j = 1, k - 1
+                call mult_givens ( c(j), s(j), j, y )
+              end do
+              h(1:k+1,k) = y(1:k+1)
+            end if
+            mu = sqrt ( h(k,k)**2 + h(k+1,k)**2 )
+            c(k) = h(k,k) / mu
+            s(k) = -h(k+1,k) / mu
+            h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
+            h(k+1,k) = 0.0D+00
+            call mult_givens ( c(k), s(k), k, g )
+            rho = abs ( g(k+1) )
+            iters = iters + 1
+            if ( verbose ) then
+              write ( *, '(a,i4,a,g14.6)' ) '    K = ', k, '  Residual = ', rho
+            end if
+            if ( rho <= rho_tol .and. rho <= tol_abs ) then
+              exit
+            end if
+          end do
+          k = k_copy - 1
+          y(k+1) = g(k+1) / h(k+1,k+1)
+          do i = k, 1, -1
+            y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
+          end do
+          do i = 1, n
+            x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
+          end do
+          if ( rho <= rho_tol .and. rho <= tol_abs ) return
+        end do
+        
+        ierr = -1
+
+        contains
+  
+        subroutine mult_givens ( c, s, k, g )
+          integer :: k
+          real(dp) :: c
+          real(dp) :: g(1:k+1)
+          real(dp) :: g1
+          real(dp) :: g2
+          real(dp) :: s
+
+          g1 = c * g(k) - s * g(k+1)
+          g2 = s * g(k) + c * g(k+1)
+
+          g(k)   = g1
+          g(k+1) = g2
+
+          return
+        end subroutine mult_givens
+        
+      end subroutine mgmres_left
+
+
+!*****************************************************************************
+!*****************************************************************************
+!
+!  Bi_CG_Stab
+!
+!*****************************************************************************
+!*****************************************************************************
+
+
+      subroutine Bi_CG_Stab( & ! based on http://www.netlib.org/templates/matlab/bicgstab.m
+            matvec, psolve, b, x, max_iter, tol, error, verbose, iters, ierr)
+         ! ierr = 0 ok
+         ! ierr = -1 failed to find a solution. reached max_iter.
+         ! ierr = 2 rho == 0d0 bug in code
+         ! ierr = -2 omega == 0d0 bug in code?
+         interface
+            subroutine matvec(x, r, same) ! set r = A*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: r(:)
+               logical, intent(in) :: same
+            end subroutine matvec
+            subroutine psolve(x, z, same) ! set z = Precond*x
+               use const_def, only: dp
+               real(dp), intent(in) :: x(:)
+               real(dp), intent(out) :: z(:)
+               logical, intent(in) :: same
+            end subroutine psolve
+         end interface
+         real(dp), intent(in) :: b(:)
+         real(dp), intent(inout) :: x(:) ! in: initial guess, out: soln
+         integer, intent(in) :: max_iter
+         real(dp), intent(in) :: tol
+         real(dp), intent(out) :: error
+         logical, intent(in) :: verbose
+         integer, intent(out) :: iters, ierr         
+         real(dp), dimension(:), allocatable :: &
+            r, r_tld, v, p, s, t, p_hat, s_hat
+         real(dp), parameter :: e = 1d-33
+         real(dp) :: rho, rho_1, alpha, omega, beta, &
+            rnrm2, bnrm2, snrm2 
+         integer :: neq
+         include 'formats'
+         ierr = 0
+         neq = size(b,dim=1)
+         if(neq /= size(x, dim=1)) &
+            stop "Error: Improper dimension of vector x in Bi_CG_Stab."
+         allocate( &
+            r(neq), r_tld(neq), v(neq), p(neq), s(neq), t(neq), &
+            p_hat(neq), s_hat(neq))
+         iters = 0
+         bnrm2 = sqrt(dot_product(b,b))   
+         if (bnrm2 == 0d0) bnrm2 = 1d0
+         call matvec(x,r,.false.) ! r = A*x
+         r = b - r ! r is residual based on initial guess
+         rnrm2 = sqrt(dot_product(r,r))          
+         error = rnrm2/bnrm2
+         if (error < tol) return ! initial guess is good enough
+         error = 1d0
+         omega = 1d0  
+         rho_1 = 1d0
+         rho = 1d0
+         r_tld = r                                         
+         v = 0d0; p = 0d0                     
+         do iters = 1, max_iter                   
+            rho = dot_product(r_tld,r) 
+            if (rho == 0d0) then 
+               ! should never happen since check norm(r) below
+               ierr = 2
+               return
+            end if
+            if (iters > 1) then                       
+               beta = (rho/rho_1) * (alpha/omega)           
+               p = r + beta * (p - omega*v) 
+            else
+               p = r
+            end if
+            call psolve(p,p_hat,.false.)   
+            call matvec(p_hat,v,.false.)                        
+            alpha = rho/dot_product(r_tld,v)                    
+            s = r - alpha*v   
+            snrm2 = sqrt(dot_product(s,s))      
+            if (snrm2 < tol) then
+               x = x + alpha*p_hat
+               if (verbose) write(*,2) 'snrm2 < tol', iters, snrm2, tol
+               ierr = 0
+               return
+            end if      
+            call psolve(s,s_hat,.false.)                
+            call matvec(s_hat,t,.false.)                
+            omega = dot_product(t,s)/dot_product(t,t)        
+            x = x + alpha*p + omega*s_hat                   
+            r = s - omega*t                              
+            rnrm2 = sqrt(dot_product(r,r))                  
+            error = rnrm2/bnrm2
+            if (error < tol) then
+               if (verbose) write(*,2) 'error < tol', iters, error, tol
+               ierr = 0
+               return
+            end if
+            if (omega == 0d0) then
+               if (verbose) write(*,2) 'omega == 0d0', iters
+               ierr = -2
+               return
+            end if
+            rho_1 = rho
+            if (verbose) write(*,2) 'iter error rho', iters, error, rho
+         end do                                                    
+         ierr = -1
+      end subroutine Bi_CG_Stab     
+      
+      
+!*****************************************************************************
+!*****************************************************************************
+!
+!  testing abtilu
+!
+!*****************************************************************************
+!*****************************************************************************
       
       
       subroutine get_lapack_solution( &
@@ -1369,174 +1731,148 @@
             write(*,*)
          end if
       end subroutine get_lapack_solution
-      
+
 
       subroutine test_abtilu_nvar1( &
+            use_mgmres, equilibrate, verbose, debug, &
             num_sweeps_factor, num_sweeps_solve, &
-            equilibrate, verbose, debug, use_Bi_CG_Stab, round, iters)
+            itr_max, mr, tol_abs, tol_rel, round)
          use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
-         logical, intent(in) :: equilibrate, verbose, debug, use_Bi_CG_Stab
-         integer, intent(in) :: num_sweeps_factor, num_sweeps_solve, round
-         integer, intent(out) :: iters
-         integer, parameter :: nvar = 1, nz = 4, neq = nvar*nz
-         real(dp), dimension(:,:), allocatable :: A
-         real(dp), dimension(:,:,:), allocatable :: ublk, dblk, lblk
-         real(dp), dimension(:), allocatable :: &
-            soln1, rhs1, actual_soln1
-         integer :: test, i, k, mr, itr_max, shft, ierr
-         logical :: write_mm
-         real(dp) :: tol_abs, tol_rel, x_error, soln_error, error
-         include 'formats'
-         
-         mr = neq - 1
-         allocate(A(neq,neq), &
-            ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
-            soln1(neq), rhs1(neq), actual_soln1(neq))
-         
-         call fill_with_NaNs_2D(A)
-         call fill_with_NaNs(soln1)
-         call fill_with_NaNs(rhs1)
-         call fill_with_NaNs(actual_soln1)
-         call fill_with_NaNs_3D(ublk)
-         call fill_with_NaNs_3D(dblk)
-         call fill_with_NaNs_3D(lblk)
-         
-         A(1,:) = (/  5d0, -3d0,  0d0,  0d0 /)
-         A(2,:) = (/ -1d0,  4d0,  2d0,  0d0 /)
-         A(3,:) = (/  0d0, -5d0,  2d0, -2d0 /)
-         A(4,:) = (/  0d0,  0d0, -1d0,  6d0  /)
-         
-         ublk(1,1,1) = A(1,2) 
-         ublk(1,1,2) = A(2,3)
-         ublk(1,1,3) = A(3,4)
-         ublk(1,1,4) = 0d0
-         
-         dblk(1,1,1) = A(1,1)
-         dblk(1,1,2) = A(2,2)
-         dblk(1,1,3) = A(3,3)
-         dblk(1,1,4) = A(4,4)
-         
-         lblk(1,1,1) = 0d0
-         lblk(1,1,2) = A(2,1)
-         lblk(1,1,3) = A(3,2)
-         lblk(1,1,4) = A(4,3)
-             
-         itr_max = 50
-         tol_abs = 1d-8
-         tol_rel = 1d-8
-         
-         write_mm = .false.
-         !write_mm = .true.
+         logical, intent(in) :: equilibrate, verbose, debug, use_mgmres
+         integer, intent(in) :: num_sweeps_factor, num_sweeps_solve, itr_max, mr, round
+         real(dp), intent(in) :: tol_abs, tol_rel
+         integer, parameter :: nvar = 1, nz = 4
+         call do1_test_abtilu( &
+            use_mgmres, equilibrate, verbose, debug, nvar, nz, &
+            setup_test_matrix_nvar1, num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, round, 'test_nvar1')
+            
+         contains
 
-         rhs1 = 1d0
+         subroutine setup_test_matrix_nvar1(A, ublk, dblk, lblk)
+            real(dp), dimension(:,:), intent(out) :: A
+            real(dp), dimension(:,:,:), intent(out) :: ublk, dblk, lblk
 
-         if (write_mm) then
-            call write_MM_mxt( &
-               nvar, nz, ublk, dblk, lblk, 'abtilu_1_mtx.txt')
-            call write_MM_vec(nvar, nz, rhs1, 'abtilu_1_rhs.txt')
-         end if
-                  
-         call psolve(rhs1,actual_soln1)
-         rhs1 = 1d0
-         soln1 = 0d0
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
+            A(1,:) = (/  5d0, -3d0,  0d0,  0d0 /)
+            A(2,:) = (/ -1d0,  4d0,  2d0,  0d0 /)
+            A(3,:) = (/  0d0, -5d0,  2d0, -2d0 /)
+            A(4,:) = (/  0d0,  0d0, -1d0,  6d0  /)
          
-         if (.false.) then  ! this works
-            call Bi_CG_Stab( &
-              matvec, psolve, rhs1, soln1, itr_max, &
-              tol_rel, error, verbose, iters, ierr)
-            if (ierr /= 0) then
-               write(*,*) 'Bi_CG_Stab ierr', ierr
-               return
-            end if
-         else 
-!            call solve_abtilu( &
-!               .not. use_Bi_CG_Stab, nvar, nz, A, &
-!               ublk, dblk, lblk, rhs1, &
-!               equilibrate, verbose, debug, &
-!               num_sweeps_factor, num_sweeps_solve, &
-!               itr_max, mr, tol_abs, tol_rel, &
-!               soln1, iters, ierr)
-         end if
-
-         if (write_mm) then
-            call write_MM_vec(nvar, nz, soln1, 'abtilu_1_soln.txt')
-            call write_MM_vec(nvar, nz, actual_soln1, 'abtilu_1_DGESVX_soln.txt')
-         end if
+            ublk(1,1,1) = A(1,2) 
+            ublk(1,1,2) = A(2,3)
+            ublk(1,1,3) = A(3,4)
+            ublk(1,1,4) = 0d0
          
-         if (verbose) then
-            write(*,*) 'actual and abtilu solutions'
-            call show_vec(nvar, nz, actual_soln1)
-            call show_vec(nvar, nz, soln1)
-         end if
-         x_error = norm2_of_diff(neq, actual_soln1, soln1)
-         if (x_error > 1d-12) then
-            write ( *, '(a,2i4,g19.11)' ) '>>>>  test_abtilu_nvar1 error ', round, iters, x_error
-            write(*,*) 'flags: equilibrate, use_Bi_CG_Stab', equilibrate, use_Bi_CG_Stab
-            write(*,*)
-            stop 'bad x_error test_abtilu_nvar1'
-            write(*,*)
-         else if (use_Bi_CG_Stab) then
-            write ( *, '(a,2i4,g19.11)' ) '  Bi_CG_Stab test_abtilu_nvar1 good ', round, iters, x_error
-         else
-            write ( *, '(a,2i4,g19.11)' ) '  mgmres test_abtilu_nvar1 good ', round, iters, x_error
-         end if
-
-        contains
-        
-        real(dp) function norm2_of_diff(neq,a,b) result(v)
-           integer, intent(in) :: neq
-           real(dp), intent(in), dimension(:) :: a, b
-           v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
-        end function norm2_of_diff
-          
-         subroutine matvec(x, r) ! set r = A*x
-            real(dp), intent(in) :: x(:)
-            real(dp), intent(out) :: r(:)
-            r = matmul(A,x)
-         end subroutine matvec
+            dblk(1,1,1) = A(1,1)
+            dblk(1,1,2) = A(2,2)
+            dblk(1,1,3) = A(3,3)
+            dblk(1,1,4) = A(4,4)
          
-         subroutine psolve(x,z) ! set z = Precond*x
-            use const_def, only: dp
-            real(dp), intent(in) :: x(:)
-            real(dp), intent(out) :: z(:)
-            integer :: ipiv(neq), ierr
-            real(dp) :: Acopy(neq,neq)
-            z = x
-            ierr = 0
-            Acopy = A
-            call DGESV( neq, 1, Acopy, neq, ipiv, z, neq, ierr )
-            if (ierr /= 0) then
-               write(*,*) 'DGESV failed', ierr
-               stop 'test_Bi_CG_Stab'
-            end if
-         end subroutine psolve
-        
-      end subroutine test_abtilu_nvar1      
+            lblk(1,1,1) = 0d0
+            lblk(1,1,2) = A(2,1)
+            lblk(1,1,3) = A(3,2)
+            lblk(1,1,4) = A(4,3)
+            
+         end subroutine setup_test_matrix_nvar1
+         
+      end subroutine test_abtilu_nvar1
       
 
       subroutine test_abtilu_nvar2( &
+            use_mgmres, equilibrate, verbose, debug, &
             num_sweeps_factor, num_sweeps_solve, &
-            equilibrate, verbose, debug, use_Bi_CG_Stab, round, iters)
+            itr_max, mr, tol_abs, tol_rel, round)
          use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
-         logical, intent(in) :: equilibrate, verbose, debug, use_Bi_CG_Stab
-         integer, intent(in) :: num_sweeps_factor, num_sweeps_solve, round
-         integer, intent(out) :: iters
-         integer, parameter :: nvar = 2, nz = 4, neq = nvar*nz
-         real(dp), dimension(:,:), allocatable :: A(:,:)
+         logical, intent(in) :: equilibrate, verbose, debug, use_mgmres
+         integer, intent(in) :: num_sweeps_factor, num_sweeps_solve, itr_max, mr, round
+         real(dp), intent(in) :: tol_abs, tol_rel
+         integer, parameter :: nvar = 2, nz = 4
+         call do1_test_abtilu( &
+            use_mgmres, equilibrate, verbose, debug, nvar, nz, &
+            setup_test_matrix_nvar2, num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, round, 'test_nvar2')
+            
+         contains
+
+         subroutine setup_test_matrix_nvar2(A, ublk, dblk, lblk)
+            real(dp), dimension(:,:), intent(out) :: A
+            real(dp), dimension(:,:,:), intent(out) :: ublk, dblk, lblk
+
+            A(1,:) = (/  2d0,  3d0,  0d0, -1d0,  0d0,  0d0,  0d0,  0d0 /)
+            A(2,:) = (/  0d0,  2d0, -1d0,  0d0,  0d0,  0d0,  0d0,  0d0 /)
+            A(3,:) = (/  0d0, -1d0,  2d0,  4d0,  0d0,  0d0,  0d0,  0d0 /)
+            A(4,:) = (/ -1d0,  0d0,  0d0,  2d0, -1d0,  0d0,  0d0,  0d0 /)
+            A(5,:) = (/  0d0,  0d0,  0d0, -1d0,  3d0, -1d0,  0d0,  0d0 /)
+            A(6,:) = (/  0d0,  0d0,  0d0,  0d0, -1d0,  3d0, -2d0,  0d0 /)
+            A(7,:) = (/  0d0,  0d0,  0d0,  0d0,  0d0, -1d0,  2d0, -1d0 /)
+            A(8,:) = (/  0d0,  0d0,  0d0,  0d0,  0d0,  0d0, -2d0,  2d0 /)
+      
+            ublk(1,1:2,1) = A(1,3:4)
+            ublk(2,1:2,1) = A(2,3:4)
+            ublk(1,1:2,2) = A(3,5:6)
+            ublk(2,1:2,2) = A(4,5:6)
+            ublk(1,1:2,3) = A(5,7:8)
+            ublk(2,1:2,3) = A(6,7:8)
+            ublk(1,1:2,4) = 0d0
+            ublk(2,1:2,4) = 0d0
+
+            dblk(1,1:2,1) = A(1,1:2)
+            dblk(2,1:2,1) = A(2,1:2)
+            dblk(1,1:2,2) = A(3,3:4)
+            dblk(2,1:2,2) = A(4,3:4)
+            dblk(1,1:2,3) = A(5,5:6)
+            dblk(2,1:2,3) = A(6,5:6)
+            dblk(1,1:2,4) = A(7,7:8)
+            dblk(2,1:2,4) = A(8,7:8)
+
+            lblk(1,1:2,1) = 0d0
+            lblk(2,1:2,1) = 0d0
+            lblk(1,1:2,2) = A(3,1:2)
+            lblk(2,1:2,2) = A(4,1:2)
+            lblk(1,1:2,3) = A(5,3:4)
+            lblk(2,1:2,3) = A(6,3:4)
+            lblk(1,1:2,4) = A(7,5:6)
+            lblk(2,1:2,4) = A(8,5:6)
+            
+         end subroutine setup_test_matrix_nvar2
+         
+      end subroutine test_abtilu_nvar2
+      
+
+      subroutine do1_test_abtilu( &
+            use_mgmres, equilibrate, verbose, debug, nvar, nz, &
+            setup_test_matrix, num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, round, str)
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         logical, intent(in) :: equilibrate, verbose, debug, use_mgmres
+         interface
+            subroutine setup_test_matrix(A, ublk, dblk, lblk)
+               use const_def, only: dp
+               real(dp), dimension(:,:), intent(out) :: A
+               real(dp), dimension(:,:,:), intent(out) :: ublk, dblk, lblk
+            end subroutine setup_test_matrix
+         end interface
+         integer, intent(in) :: &
+            nvar, nz, num_sweeps_factor, num_sweeps_solve, itr_max, mr, round
+         real(dp), intent(in) :: tol_abs, tol_rel
+         character (len=*), intent(in) :: str
+         
+         real(dp), dimension(:,:), allocatable :: A, Acopy
          real(dp), dimension(:,:,:), allocatable :: ublk, dblk, lblk
          real(dp), dimension(:), allocatable :: &
             soln1, rhs1, actual_soln1
-         integer :: test, i, k, mr, itr_max, shft, ierr
+         integer :: test, i, k, shft, ierr, iters, neq
          logical :: write_mm
-         real(dp) :: tol_abs, tol_rel, x_error, soln_error
+         real(dp) :: x_error, soln_error, error
          include 'formats'
          
-         mr = neq - 1
-         allocate(A(neq,neq), &
+         neq = nvar*nz
+         
+         allocate(A(neq,neq), Acopy(neq,neq),&
             ublk(nvar,nvar,nz), dblk(nvar,nvar,nz), lblk(nvar,nvar,nz), &
             soln1(neq), rhs1(neq), actual_soln1(neq))
          
+         if (.false.) then
          call fill_with_NaNs(soln1)
          call fill_with_NaNs(rhs1)
          call fill_with_NaNs(actual_soln1)
@@ -1544,46 +1880,9 @@
          call fill_with_NaNs_3D(ublk)
          call fill_with_NaNs_3D(dblk)
          call fill_with_NaNs_3D(lblk)
-
-         A(1,:) = (/  2d0,  3d0,  0d0, -1d0,  0d0,  0d0,  0d0,  0d0 /)
-         A(2,:) = (/  0d0,  2d0, -1d0,  0d0,  0d0,  0d0,  0d0,  0d0 /)
-         A(3,:) = (/  0d0, -1d0,  2d0,  4d0,  0d0,  0d0,  0d0,  0d0 /)
-         A(4,:) = (/ -1d0,  0d0,  0d0,  2d0, -1d0,  0d0,  0d0,  0d0 /)
-         A(5,:) = (/  0d0,  0d0,  0d0, -1d0,  3d0, -1d0,  0d0,  0d0 /)
-         A(6,:) = (/  0d0,  0d0,  0d0,  0d0, -1d0,  3d0, -2d0,  0d0 /)
-         A(7,:) = (/  0d0,  0d0,  0d0,  0d0,  0d0, -1d0,  2d0, -1d0 /)
-         A(8,:) = (/  0d0,  0d0,  0d0,  0d0,  0d0,  0d0, -2d0,  2d0 /)
+         end if
          
-         ublk(1,1:2,1) = A(1,3:4)
-         ublk(2,1:2,1) = A(2,3:4)
-         ublk(1,1:2,2) = A(3,5:6)
-         ublk(2,1:2,2) = A(4,5:6)
-         ublk(1,1:2,3) = A(5,7:8)
-         ublk(2,1:2,3) = A(6,7:8)
-         ublk(1,1:2,4) = 0d0
-         ublk(2,1:2,4) = 0d0
-
-         dblk(1,1:2,1) = A(1,1:2)
-         dblk(2,1:2,1) = A(2,1:2)
-         dblk(1,1:2,2) = A(3,3:4)
-         dblk(2,1:2,2) = A(4,3:4)
-         dblk(1,1:2,3) = A(5,5:6)
-         dblk(2,1:2,3) = A(6,5:6)
-         dblk(1,1:2,4) = A(7,7:8)
-         dblk(2,1:2,4) = A(8,7:8)
-
-         lblk(1,1:2,1) = 0d0
-         lblk(2,1:2,1) = 0d0
-         lblk(1,1:2,2) = A(3,1:2)
-         lblk(2,1:2,2) = A(4,1:2)
-         lblk(1,1:2,3) = A(5,3:4)
-         lblk(2,1:2,3) = A(6,3:4)
-         lblk(1,1:2,4) = A(7,5:6)
-         lblk(2,1:2,4) = A(8,5:6)
-             
-         itr_max = 50
-         tol_abs = 1.0D-08
-         tol_rel = 1.0D-08
+         call setup_test_matrix(A, ublk, dblk, lblk)
 
          write_mm = .true.
          
@@ -1591,41 +1890,44 @@
 
          if (write_mm) then
             call write_MM_mxt( &
-               nvar, nz, ublk, dblk, lblk, 'abtilu_2_mtx.txt')
-            call write_MM_vec(nvar, nz, rhs1, 'abtilu_2_rhs.txt')
+               nvar, nz, ublk, dblk, lblk, trim(str)//'_mtx.txt')
+            call write_MM_vec(nvar, nz, rhs1, trim(str)//'_rhstx.txt')
          end if
          
          ! get solution from DGESVX
          call get_lapack_solution(neq, A, rhs1, actual_soln1, verbose, ierr)
-         if (ierr /= 0) stop 'test_abtilu_nvar2 failed in DGESVX'
+         if (ierr /= 0) then
+            write(*,*) trim(str) // 'do1_test_abtilu failed in DGESVX'
+            stop 'do1_test_abtilu'
+         end if
          rhs1 = 1d0
          soln1 = 0d0
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
          
-!         call solve_abtilu( &
-!            .not. use_Bi_CG_Stab, nvar, nz, A, &
-!            ublk, dblk, lblk, rhs1, &
-!            equilibrate, verbose, debug, &
-!            num_sweeps_factor, num_sweeps_solve, &
-!            itr_max, mr, tol_abs, tol_rel, &
-!            soln1, iters, ierr)
+         call solve_abtilu( &
+            use_mgmres, nvar, nz, A, &
+            ublk, dblk, lblk, rhs1, &
+            equilibrate, verbose, debug, &
+            num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, &
+            soln1, iters, ierr)
 
          if (write_mm) then
-            call write_MM_vec(nvar, nz, soln1, 'abtilu_2_soln.txt')
-            call write_MM_vec(nvar, nz, actual_soln1, 'abtilu_2_DGESVX_soln.txt')
+            call write_MM_vec(nvar, nz, soln1, trim(str)//'_soln.txt')
+            call write_MM_vec(nvar, nz, actual_soln1, trim(str)//'_DGESVX_soln.txt')
          end if
 
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
          if (x_error > 1d-12) then
-            write ( *, '(a,2i4,g19.11)' ) '>>>>  test_abtilu_nvar2 error ', round, iters, x_error
-            write(*,*) 'flags: equilibrate, use_Bi_CG_Stab', equilibrate, use_Bi_CG_Stab
+            write ( *, '(a,2i4,g19.11)' ) '>>>>  '//trim(str)//' error ', round, iters, x_error
+            write(*,*) 'flags: equilibrate, use_mgmres', equilibrate, use_mgmres
             write(*,*)
-            stop 'bad x_error test_abtilu_nvar2'
+            stop 'bad x_error do1_test_abtilu'
             write(*,*)
-         else if (use_Bi_CG_Stab) then
-            write ( *, '(a,2i4,g19.11)' ) '  Bi_CG_Stab test_abtilu_nvar2 good ', round, iters, x_error
+         else if (use_mgmres) then
+            write ( *, '(a,2i4,g19.11)' ) '  mgmres '//trim(str)//' good ', round, iters, x_error
          else
-            write ( *, '(a,2i4,g19.11)' ) '  mgmres test_abtilu_nvar2 good ', round, iters, x_error
+            write ( *, '(a,2i4,g19.11)' ) '  Bi_CG_Stab '//trim(str)//' good ', round, iters, x_error
          end if
 
         contains
@@ -1636,179 +1938,15 @@
            v = sqrt(sum(pow2(a(1:neq) - b(1:neq))))
         end function norm2_of_diff
         
-      end subroutine test_abtilu_nvar2     
+      end subroutine do1_test_abtilu     
 
-
-      subroutine Bi_CG_Stab( & ! based on http://www.netlib.org/templates/matlab/bicgstab.m
-            matvec, psolve, b, x, max_iter, tol, error, verbose, iters, ierr)
-         interface
-            subroutine matvec(x,r) ! set r = A*x
-               use const_def, only: dp
-               real(dp), intent(in) :: x(:)
-               real(dp), intent(out) :: r(:)
-            end subroutine matvec
-            subroutine psolve(x,z) ! set z = Precond*x
-               use const_def, only: dp
-               real(dp), intent(in) :: x(:)
-               real(dp), intent(out) :: z(:)
-            end subroutine psolve
-         end interface
-         real(dp), intent(in) :: b(:)
-         real(dp), intent(inout) :: x(:) ! in: initial guess, out: soln
-         integer, intent(in) :: max_iter
-         real(dp), intent(in) :: tol
-         real(dp), intent(out) :: error
-         logical, intent(in) :: verbose
-         integer, intent(out) :: iters, ierr         
-         real(dp), dimension(:), allocatable :: &
-            r, r_tld, v, p, s, t, p_hat, s_hat
-         real(dp), parameter :: e = 1d-33
-         real(dp) :: rho, rho_1, alpha, omega, beta, &
-            rnrm2, bnrm2, snrm2 
-         integer :: neq
-         include 'formats'
-         neq = size(b,dim=1)
-         if(neq /= size(x, dim=1)) &
-            stop "Error: Improper dimension of vector x in Bi_CG_Stab."
-         allocate( &
-            r(neq), r_tld(neq), v(neq), p(neq), s(neq), t(neq), &
-            p_hat(neq), s_hat(neq))
-         iters = 0
-         bnrm2 = sqrt(dot_product(b,b))   
-         if (bnrm2 == 0d0) bnrm2 = 1d0
-         call matvec(x,r) ! r = A*x
-         r = b - r ! r is residual
-         rnrm2 = sqrt(dot_product(r,r))          
-         error = rnrm2/bnrm2
-         if (error < tol) return
-         error = 1d0
-         omega = 1d0  
-         rho_1 = 1d0
-         rho = 1d0
-         r_tld = r                                         
-         v = 0d0; p = 0d0                     
-         do iters = 1, max_iter                   
-            rho = dot_product(r_tld,r) 
-            if (rho == 0d0) then
-               ierr = 2
-               return
-            end if
-            if (iters > 1) then                       
-               beta = (rho/rho_1) * (alpha/omega)           
-               p = r + beta * (p - omega*v) 
-            else
-               p = r
-            end if
-            call psolve(p,p_hat)   
-            call matvec(p_hat,v)                        
-            alpha = rho/dot_product(r_tld,v)                    
-            s = r - alpha*v   
-            snrm2 = sqrt(dot_product(s,s))      
-            if (snrm2 < tol) then
-               x = x + alpha*p_hat
-               if (verbose) write(*,2) 'snrm2 < tol', iters, snrm2, tol
-               ierr = 0
-               return
-            end if      
-            call psolve(s,s_hat)                
-            call matvec(s_hat,t)                
-            omega = dot_product(t,s)/dot_product(t,t)        
-            x = x + alpha*p + omega*s_hat                   
-            r = s - omega*t                              
-            rnrm2 = sqrt(dot_product(r,r))                  
-            error = rnrm2/bnrm2
-            if (error < tol) then
-               if (verbose) write(*,2) 'error < tol', iters, error, tol
-               ierr = 0
-               return
-            end if
-            if (omega == 0d0) then
-               if (verbose) write(*,2) 'omega == 0d0', iters
-               ierr = -2
-               return
-            end if
-            rho_1 = rho
-            if (verbose) write(*,2) 'iter error rho', iters, error, rho
-         end do                                                    
-         ierr = 1
-      end subroutine Bi_CG_Stab     
-
-
-      subroutine test_Bi_CG_Stab
-          integer, parameter :: m=4, n=4
-          real(dp), dimension(1:m,1:n) :: A
-          real(dp), dimension(1:m) :: x_calculated, x_actual, b
-          real(dp) :: tol, error
-          integer :: max_iter, iters, ierr
-          logical :: verbose, use_dummy_psolve
-          ierr = 0
-          A(1,:) = (/  5d0, -3d0,  0d0,  0d0 /)
-          A(2,:) = (/ -1d0,  4d0,  2d0,  0d0 /)
-          A(3,:) = (/  0d0, -5d0,  2d0, -2d0 /)
-          A(4,:) = (/  0d0,  0d0, -1d0,  6d0 /)
-
-          b = 1d0
-          use_dummy_psolve = .false.
-          call psolve(b,x_actual)
-          !use_dummy_psolve = .true.
-          
-          !x_actual(:) = [ 5d0, 8d0, 10d0, 12d0]
-          !b = matmul(A,x_actual)
-          
-          x_calculated = 0d0 ! initial guess
-          max_iter = 100
-          tol = 1d-8
-          verbose = .true.
-          
-          call Bi_CG_Stab( &
-            matvec, psolve, b, x_calculated, max_iter, &
-            tol, error, verbose, iters, ierr)
-          if (ierr /= 0) then
-             write(*,*) 'Bi_CG_Stab ierr', ierr
-             return
-          end if
-          
-          print*, "iterations required =", iters
-          print*, "analytical solution =", x_actual
-          print*, "  computed solution =", x_calculated
-          print*, "     relative error =", abs(x_actual-x_calculated)/x_actual
-          write(*,*)
-          
-          contains
-          
-         subroutine matvec(x, r) ! set r = A*x
-            real(dp), intent(in) :: x(:)
-            real(dp), intent(out) :: r(:)
-            r = matmul(A,x)
-         end subroutine matvec
-         
-         subroutine psolve(x,z) ! set z = Precond*x
-            use const_def, only: dp
-            real(dp), intent(in) :: x(:)
-            real(dp), intent(out) :: z(:)
-            integer :: ipiv(n), ierr
-            real(dp) :: Acopy(n,n)
-            z = x
-            if (use_dummy_psolve) return
-            ierr = 0
-            Acopy = A
-            call DGESV( n, 1, Acopy, m, ipiv, z, n, ierr )
-            if (ierr /= 0) then
-               write(*,*) 'DGESV failed', ierr
-               stop 'test_Bi_CG_Stab'
-            end if
-         end subroutine psolve
-          
-
-      end subroutine test_Bi_CG_Stab
-
-
-      
       
       subroutine test_abtilu()
          include 'formats'
-         logical :: equilibrate, verbose, use_Bi_CG_Stab, debug
-         integer :: c1, c2, j, iters, num_sweeps_factor, num_sweeps_solve
+         logical :: equilibrate, verbose, use_mgmres, debug
+         real(dp) :: tol_abs, tol_rel
+         integer :: mr, iter_max, num_sweeps_factor, num_sweeps_solve, &
+            c1, c2, j, iters
          
          if (.false.) then ! standard settings for ck
             num_sweeps_factor = 1
@@ -1816,14 +1954,45 @@
             equilibrate = .true.
             verbose = .false.
             debug = .false.
-            use_Bi_CG_Stab = .false.
-         else if (.true.) then ! testing Bi_CG_Stab
-            num_sweeps_factor = 3
-            num_sweeps_solve = 3
-            equilibrate = .true.
-            verbose = .false.
+            use_mgmres = .true.
+            
+         else if (.true.) then
+            mr = 30
+            iter_max = 100
+            
+            tol_abs = 1d-14
+            tol_rel = 1d-14
+            
+            !debug = .true.
             debug = .false.
-            use_Bi_CG_Stab = .true.
+            
+            !verbose = .true.
+            verbose = .false.
+            
+            equilibrate = .true.
+            
+            !use_mgmres = .true.
+            use_mgmres = .false.
+            
+            if (use_mgmres) then
+               num_sweeps_factor = 1 ! 1 is ok for mgmres
+            else
+               num_sweeps_factor = 3 ! Bi_CG_Stab needs 3
+            end if
+            num_sweeps_solve = 3
+
+            call test_abtilu_nvar1( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, 0)
+            call test_abtilu_nvar2( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, 0)
+            stop 'done test_abtilu'
+
+
+
          else ! special test
             j = 0
             !debug = .false.
@@ -1832,8 +2001,8 @@
             verbose = .false.
             !verbose = .true.
 
-            !use_Bi_CG_Stab = .false.
-            use_Bi_CG_Stab = .true.
+            !use_mgmres = .false.
+            use_mgmres = .true.
             num_sweeps_factor = 3
             num_sweeps_solve = 6
 
@@ -1841,11 +2010,13 @@
             !equilibrate = .true.
             write(*,*) 'test_abtilu equilibrate', equilibrate
             call test_abtilu_nvar1( &
+               use_mgmres, equilibrate, verbose, debug, &
                num_sweeps_factor, num_sweeps_solve, &
-               equilibrate, verbose, debug, use_Bi_CG_Stab, j, iters)
+               iter_max, mr, tol_abs, tol_rel, 0)
             call test_abtilu_nvar2( &
+               use_mgmres, equilibrate, verbose, debug, &
                num_sweeps_factor, num_sweeps_solve, &
-               equilibrate, verbose, debug, use_Bi_CG_Stab, j, iters)
+               iter_max, mr, tol_abs, tol_rel, 0)
             stop
          end if
          
@@ -1854,12 +2025,14 @@
             write(*,*) 'test_abtilu equilibrate', equilibrate
             do j=1,500
                !call test_Bi_CG_Stab
-               call test_abtilu_nvar1( &
-                  num_sweeps_factor, num_sweeps_solve, &
-                  equilibrate, verbose, debug, use_Bi_CG_Stab, j, iters)
-               call test_abtilu_nvar2( &
-                  num_sweeps_factor, num_sweeps_solve, &
-                  equilibrate, verbose, debug, use_Bi_CG_Stab, j, iters)
+            call test_abtilu_nvar1( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, j)
+            call test_abtilu_nvar2( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, j)
             end do
             write(*,*)
          end do
@@ -1868,65 +2041,6 @@
       end subroutine test_abtilu
 
 
-      
-      subroutine copy_lower_to_square(nvar,nz,blk,s)
-         ! k > 1
-         ! ii = (k-2)*nvar + i
-         ! jj = (k-1)*nvar + j
-         ! s(ii,jj) = blk(i,j,k)
-         integer, intent(in) :: nvar, nz
-         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
-         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
-         integer :: k, i, j, ii, jj
-         do k=2,nz
-            ii = (k-1)*nvar
-            do i=1,nvar
-               jj = (k-2)*nvar
-               do j=1,nvar
-                  s(ii+i,jj+j) = blk(i,j,k)
-               end do
-            end do
-         end do
-      end subroutine copy_lower_to_square
-
-      subroutine copy_diag_to_square(nvar,nz,blk,s)         
-         ! ii = (k-1)*nvar + i
-         ! jj = (k-1)*nvar + j
-         ! s(ii,jj) = blk(i,j,k)
-         integer, intent(in) :: nvar, nz
-         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
-         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
-         integer :: k, i, j, ii, jj
-         do k=1,nz
-            ii = (k-1)*nvar
-            do i=1,nvar
-               jj = (k-1)*nvar
-               do j=1,nvar
-                  s(ii+i,jj+j) = blk(i,j,k)
-               end do
-            end do
-         end do
-      end subroutine copy_diag_to_square
-      
-      subroutine copy_upper_to_square(nvar,nz,blk,s)
-         ! k < nz
-         ! ii = k*nvar + i
-         ! jj = (k-1)*nvar + j
-         ! s(ii,jj) = blk(i,j,k)
-         integer, intent(in) :: nvar, nz
-         real(dp), intent(in) :: blk(:,:,:) ! (nvar,nvar,nz)
-         real(dp), intent(inout) :: s(:,:) ! (neq,neq)
-         integer :: k, i, j, ii, jj
-         do k=1,nz
-            ii = (k-1)*nvar
-            do i=1,nvar
-               jj = k*nvar
-               do j=1,nvar
-                  s(ii+i,jj+j) = blk(i,j,k)
-               end do
-            end do
-         end do
-      end subroutine copy_upper_to_square
       
       
       end module abtilu
