@@ -1021,34 +1021,56 @@
          end subroutine apply_coeff
          
          
-         subroutine test_solve_abtilu_with_mgmres()
-            use abtilu, only: solve_abtilu_with_mgmres, show_vec
+         subroutine test_solve_abtilu()
+            use abtilu, only: solve_abtilu, show_vec
             use star_bcyclic, only: bcyclic_factor, bcyclic_solve
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
-            logical :: exact, verbose, equilibrate
+            logical :: debug, use_A, verbose, equilibrate, use_mgmres
             real(dp) :: tol_abs, tol_rel
-            integer :: ierr, nz_test, i
+            integer :: ierr, nz_test, i, iters
+            real(dp), allocatable :: A(:,:)
             include 'formats'
             ierr = 0
-            mr = 10
-            itr_max = 20
-            tol_abs = 1d-8
-            tol_rel = 1d-5
+            mr = 30
+            itr_max = 100
+            tol_abs = 1d-14
+            tol_rel = 1d-14
             num_sweeps_factor = 1
             num_sweeps_solve = 3
-            !exact = .true.
-            exact = .false.
+            !debug = .true.
+            debug = .false.
             verbose = .true.
             equilibrate = .true.
-            !equilibrate = .false.
+            use_mgmres = .true.
+            use_A = .false.
             
-            ! 105 ok, 110 bad
-            nz_test = 105
+            nz_test = 500 ! 600 okay. 700 stalls. 
+            ! 500  1 sweeps solve takes 44*30 + 30 tries
+            ! 500  2 sweeps solve takes 27*30 + 20 tries
+            ! 500  3 sweeps solve takes 24*30 + 12 tries
+            ! 500  6 sweeps solve takes 14*30 +  4 tries
+            ! 500 12 sweeps solve takes  6*30 + 16 tries
+            ! 500 24 sweeps solve takes  2*30 + 20 tries
+            ! 500 48 sweeps solve takes  1*30 + 12 tries
+            ! 500 96 sweeps solve takes  1*30 +  1 tries
+            ! increasing sweeps factor makes it worse
             
             do i=1,nvar
                write(*,2) trim(s% nameofvar(i)), i
             end do
+            
+            if (debug .and. use_A) then
+               num_sweeps_factor = 6
+               num_sweeps_solve = 6
+               allocate(A(neq,neq))
+               A(neq,neq) = 0d0
+               call copy_lower_to_square(nvar,nz_test,lblk,A)
+               call copy_diag_to_square(nvar,nz_test,dblk,A)  
+               call copy_upper_to_square(nvar,nz_test,ublk,A)
+            else
+               allocate(A(1,1))
+            end if
 
             !$omp simd
             do i = 1, nvar*nvar*nz
@@ -1062,13 +1084,16 @@
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
 
-            call solve_abtilu_with_mgmres( &            
-               nvar, nz_test, ublk, dblk, lblk, b1, &
-               equilibrate, exact, &
-               num_sweeps_factor, num_sweeps_solve, & ! for abtilu
-               itr_max, mr, tol_abs, tol_rel, & ! for mgmres
-               soln1, verbose, ierr)
-            if (ierr /= 0) stop 'solve_abtilu_with_mgmres failed'
+            call solve_abtilu( &            
+               use_mgmres, nvar, nz_test, A, &
+               ublk, dblk, lblk, b1, &
+               equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               itr_max, mr, tol_abs, tol_rel, &
+               soln1, iters, ierr)
+            if (ierr /= 0) stop 'solve_abtilu failed'
+            
+            stop 'solve_abtilu done'
                
             !$omp simd
             do i = 1, nvar*nvar*nz
@@ -1094,16 +1119,13 @@
                iter, ierr)
             if (ierr /= 0) stop 'bcyclic_solve failed'
             
-            if (verbose .and. nz < 20) then
-               write(*,*)
-               call show_vec(nvar, nz, soln1)
-               write(*,*) 'bcyclic solution'
-            end if
+            call show_vec(nvar, nz_test, soln1)
+            write(*,*) 'result from bcyclic'
             write(*,*)
                
-            stop 'testing solve_abtilu_with_mgmres from star_solver'
+            stop 'testing solve_abtilu from star_solver'
          
-         end subroutine test_solve_abtilu_with_mgmres
+         end subroutine test_solve_abtilu
 
 
          logical function solve_equ()
@@ -1117,9 +1139,10 @@
             solve_equ = .true.
             
             done = .false.
-            if (s% x_logical_ctrl(19)) then ! testing abtilu
-               call test_abtilu()
-               !call test_solve_abtilu_with_mgmres()
+            if (s% x_logical_ctrl(19) .and. s% model_number == 2) then ! testing abtilu
+               !call test_abtilu()
+               !call test_star_solve_abtilu()
+               call test_solve_abtilu()
             end if
 
             if (s% doing_timing) then

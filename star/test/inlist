@@ -44,6 +44,8 @@
       !terminal_interval = 1
       
       
+      !mix_factor = 0d0
+      !dxdt_nuc_factor = 0d0
       x_logical_ctrl(19) = .true. ! testing abtilu
       
 
