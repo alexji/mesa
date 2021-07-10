@@ -1190,7 +1190,7 @@
             solve_equ = .true.
             
             done = .false.
-            if (s% x_logical_ctrl(19) .and. s% model_number == 2) then ! testing abtilu
+            if (s% x_logical_ctrl(19)) then ! testing abtilu
                call test_solve_abtilu()
             end if
 

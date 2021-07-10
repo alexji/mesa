@@ -5,6 +5,16 @@
       mesa_dir = '../..'  ! use current mesa_dir for test
       
       show_log_description_at_start = .false. 
+      
+      change_initial_net = .true.
+      !new_net_name = 'basic.net'
+      !new_net_name = 'mesa_67.net'
+      !new_net_name = 'mesa_128.net'
+      new_net_name = 'mesa_235.net'
+      
+      
+      
+      
 
 / ! end of star_job namelist
 
