@@ -34,7 +34,7 @@
 
       private
       public :: test_abtilu, &
-         solve_abtilu, show_vec, write_MM_mxt, write_MM_vec, &
+         solve_abtilu, show_vec, write_MM_mxt, write_MM_vec, write_MUMPS_file, &
          copy_lower_to_square, copy_diag_to_square, copy_upper_to_square
 
 
@@ -1060,6 +1060,106 @@
             end do
          end do
       end subroutine copy_upper_to_square
+
+
+!     example MUMPS file for 5x5 matrix (with 12 nonzeros), rhs, and optional solution
+!      5             : N
+!      12            : NNZ
+!      1 2 3.0
+!      2 3 -3.0
+!      4 3 2.0
+!      5 5 1.0
+!      2 1 3.0
+!      1 1 2.0
+!      5 2 4.0
+!      3 4 2.0
+!      2 5 6.0
+!      3 2 -1.0
+!      1 3 4.0
+!      3 3 1.0       : A
+!      20.0
+!      24.0
+!      9.0
+!      6.0
+!      13.0          : RHS
+!      5             : number of soln values (either 0 or N)
+!      1.0
+!      2.0
+!      3.0
+!      4.0
+!      5.0           : SOLN
+      
+      subroutine write_MUMPS_file( &
+            nvar, nz, ublk, dblk, lblk, rhs1, soln1, filename)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:,:,:), intent(in) :: & ! (nvar,nvar,nz)
+            ublk, dblk, lblk
+         real(dp), dimension(:), intent(in) :: rhs1, soln1 ! (nvar*nz)
+         character (len=*), intent(in) :: filename
+         integer :: neq, non_zeros, iounit, i
+         neq = nvar*nz
+         non_zeros = 0d0
+         call for_each_nonzero(.false.) ! count nonzeros
+         open(newunit=iounit, file=trim(filename), action='write', status='replace')
+         write(iounit, '(i8)') neq
+         write(iounit, '(i8)') non_zeros
+         call for_each_nonzero(.true.) ! output nonzeros
+         ! write the rhs
+         do i=1,neq
+            write(iounit, '(1e26.16)') rhs1(i)
+         end do
+         if (size(soln1,dim=1) >= neq) then ! write the soln
+            write(iounit, '(i8)') neq
+            do i=1,neq
+               write(iounit, '(1e26.16)') soln1(i)
+            end do
+         else
+            write(iounit, '(i8)') 0
+         end if
+         close(iounit)
+         
+         contains
+         
+         subroutine for_each_nonzero(write_flag)
+            logical, intent(in) :: write_flag
+            integer :: i, j, k, r, c
+            do k=1,nz
+               do i=1,nvar 
+                  r = (k-1)*nvar + i
+                  if (k > 1) then
+                     c = (k-2)*nvar
+                     do j=1,nvar
+                        call do1(r, c+j, lblk(i,j,k), write_flag)
+                     end do
+                  end if
+                  c = (k-1)*nvar
+                  do j=1,nvar
+                     call do1(r, c+j, dblk(i,j,k), write_flag)
+                  end do
+                  if (k < nz) then
+                     c = k*nvar
+                     do j=1,nvar
+                        call do1(r, c+j, ublk(i,j,k), write_flag)
+                     end do
+                  end if
+               end do
+            end do
+         end subroutine for_each_nonzero
+         
+         subroutine do1(r,c,v,write_flag)
+            integer, intent(in) :: r, c
+            real(dp), intent(in) :: v
+            logical, intent(in) :: write_flag
+            if (v == 0d0) return
+            if (write_flag) then
+               write(iounit, '(2i8,1e26.16)') r, c, v
+            else
+               non_zeros = non_zeros + 1
+            end if
+         end subroutine do1
+         
+      end subroutine write_MUMPS_file
+
       
       subroutine write_MM_mxt( &
             nvar, nz, ublk, dblk, lblk, filename)
@@ -1862,7 +1962,7 @@
          real(dp), dimension(:), allocatable :: &
             soln1, rhs1, actual_soln1
          integer :: test, i, k, shft, ierr, iters, neq
-         logical :: write_mm
+         logical :: write_mumps, write_mm
          real(dp) :: x_error, soln_error, error
          include 'formats'
          
@@ -1884,15 +1984,10 @@
          
          call setup_test_matrix(A, ublk, dblk, lblk)
 
-         write_mm = .true.
+         write_mumps = .true.
+         write_mm = .false.
          
          rhs1 = 1d0
-
-         if (write_mm) then
-            call write_MM_mxt( &
-               nvar, nz, ublk, dblk, lblk, trim(str)//'_mtx.txt')
-            call write_MM_vec(nvar, nz, rhs1, trim(str)//'_rhstx.txt')
-         end if
          
          ! get solution from DGESVX
          call get_lapack_solution(neq, A, rhs1, actual_soln1, verbose, ierr)
@@ -1900,6 +1995,18 @@
             write(*,*) trim(str) // 'do1_test_abtilu failed in DGESVX'
             stop 'do1_test_abtilu'
          end if
+            
+         if (write_mumps) then
+            call write_MUMPS_file( &
+               nvar, nz, ublk, dblk, lblk, rhs1, actual_soln1, trim(str)//'_mumps.txt')
+         end if
+         
+         if (write_mm) then
+            call write_MM_mxt( &
+               nvar, nz, ublk, dblk, lblk, trim(str)//'_mtx.txt')
+            call write_MM_vec(nvar, nz, rhs1, trim(str)//'_rhs.txt')
+         end if
+
          rhs1 = 1d0
          soln1 = 0d0
          x_error = norm2_of_diff(neq, actual_soln1, soln1)

@@ -1022,18 +1022,21 @@
          
          
          subroutine test_solve_abtilu()
-            use abtilu, only: solve_abtilu, show_vec, test_abtilu
+            use abtilu, only: &
+               solve_abtilu, show_vec, test_abtilu, write_MUMPS_file
             use star_bcyclic, only: bcyclic_factor, bcyclic_solve
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
-            logical :: debug, use_A, verbose, equilibrate, use_mgmres
+            logical :: &
+               debug, use_A, verbose, equilibrate, use_mgmres, write_MUMPS
             real(dp) :: tol_abs, tol_rel
-            integer :: ierr, nz_test, i, iters
+            integer :: ierr, nz_test, i, iters, neq
             real(dp), allocatable :: A(:,:)
+            integer(8) :: time0, time1, clock_rate
             include 'formats'
             ierr = 0
 
-            call test_abtilu(); return
+            !call test_abtilu(); return
             
             mr = 30
             itr_max = 100
@@ -1063,8 +1066,10 @@
             
             use_A = .false.
             
+            write_MUMPS = .true.
             
-            nz_test = 500 ! 600 okay. 700 stalls. 
+            
+            nz_test = nz ! 500 ! 600 okay. 700 stalls. 
             ! the following results are for left preconditioned.
             ! 100 ok, but 200 fails for right.  weird.
             ! with tol 1d-14
@@ -1077,6 +1082,8 @@
             ! 500 48 sweeps solve takes  1*30 + 12 tries
             ! 500 96 sweeps solve takes  1*30 +  1 tries
             ! increasing sweeps factor makes it worse
+            
+            neq = nvar*nz_test
             
             do i=1,nvar
                write(*,2) trim(s% nameofvar(i)), i
@@ -1105,29 +1112,34 @@
             do i=1,neq
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
-
-            call solve_abtilu( &            
-               use_mgmres, nvar, nz_test, A, &
-               ublk, dblk, lblk, b1, &
-               equilibrate, verbose, debug, &
-               num_sweeps_factor, num_sweeps_solve, &
-               itr_max, mr, tol_abs, tol_rel, &
-               soln1, iters, ierr)
-            if (ierr /= 0) stop 'solve_abtilu failed'
             
-            stop 'solve_abtilu done'
+            if (write_MUMPS .and. nz < 700) then ! skip this and just write the mumps file
+
+               call solve_abtilu( &            
+                  use_mgmres, nvar, nz_test, A, &
+                  ublk, dblk, lblk, b1, &
+                  equilibrate, verbose, debug, &
+                  num_sweeps_factor, num_sweeps_solve, &
+                  itr_max, mr, tol_abs, tol_rel, &
+                  soln1, iters, ierr)
+               if (ierr /= 0) stop 'solve_abtilu failed'
                
-            !$omp simd
-            do i = 1, nvar*nvar*nz
-               ublk1(i) = save_ublk1(i)
-               dblk1(i) = save_dblk1(i)
-               lblk1(i) = save_lblk1(i)
-            end do
-               
-            !$omp simd
-            do i=1,neq
-               b1(i) = -equ1(i) ! b1 is rhs of matrix equation
-            end do
+               !$omp simd
+               do i = 1, nvar*nvar*nz
+                  ublk1(i) = save_ublk1(i)
+                  dblk1(i) = save_dblk1(i)
+                  lblk1(i) = save_lblk1(i)
+               end do
+                           
+               !$omp simd
+               do i=1,neq
+                  b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+               end do
+            
+            end if
+            
+            
+            call system_clock(time0,clock_rate)
             
             call bcyclic_factor( &
                s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
@@ -1141,10 +1153,28 @@
                iter, ierr)
             if (ierr /= 0) stop 'bcyclic_solve failed'
             
-            call show_vec(nvar, nz_test, soln1)
-            write(*,*) 'result from bcyclic'
-            write(*,*)
-               
+            call system_clock(time1,clock_rate)
+            write(*,'(a,f15.9)') ' bcyclic factor+solve elapsed time', dble(time1-time0)/clock_rate
+            write(*,2) 'nvar', nvar
+            write(*,2) 'nz_test', nz_test
+            write(*,2) 'neq', neq
+                        
+            if (write_MUMPS) then
+               !$omp simd
+               do i = 1, nvar*nvar*nz
+                  ublk1(i) = save_ublk1(i)
+                  dblk1(i) = save_dblk1(i)
+                  lblk1(i) = save_lblk1(i)
+               end do
+               !$omp simd
+               do i=1,neq
+                  b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+               end do
+               call write_MUMPS_file( &
+                  nvar, nz_test, ublk, dblk, lblk, b1, soln1, 'test_star_mumps.txt')
+               write(*,*) 'test_star_mumps.txt'
+            end if
+            
             stop 'testing solve_abtilu from star_solver'
          
          end subroutine test_solve_abtilu
