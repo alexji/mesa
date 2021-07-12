@@ -1998,7 +1998,7 @@
             
          if (write_mumps) then
             call write_MUMPS_file( &
-               nvar, nz, ublk, dblk, lblk, rhs1, actual_soln1, trim(str)//'_mumps.txt')
+               nvar, nz, ublk, dblk, lblk, rhs1, actual_soln1, trim(str)//'.txt')
          end if
          
          if (write_mm) then
@@ -2146,8 +2146,6 @@
          write(*,*)
          stop 'done test_abtilu'
       end subroutine test_abtilu
-
-
-      
+               
       
       end module abtilu

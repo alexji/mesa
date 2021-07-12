@@ -1069,7 +1069,7 @@
             write_MUMPS = .true.
             
             
-            nz_test = nz ! 500 ! 600 okay. 700 stalls. 
+            nz_test = 1800 ! 600 okay. 700 stalls. 
             ! the following results are for left preconditioned.
             ! 100 ok, but 200 fails for right.  weird.
             ! with tol 1d-14
