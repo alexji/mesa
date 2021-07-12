@@ -103,6 +103,7 @@ module skye_thermodynamics
    subroutine pack_for_export(F_ideal_ion, F_coul, F_rad, F_ele, temp, dens, xnefer, etaele, abar, zbar, &
                                           phase, latent_ddlnT, latent_ddlnRho, res, d_dlnRho, d_dlnT)
       use eos_def
+      use const_def, only: avo
       type(auto_diff_real_2var_order3), intent(in) :: F_ideal_ion, F_coul, F_rad, F_ele, temp, dens, xnefer, etaele
       type(auto_diff_real_2var_order3), intent(in) :: phase, latent_ddlnT, latent_ddlnRho
       real(dp), intent(in) :: abar, zbar

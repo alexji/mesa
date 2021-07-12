@@ -313,7 +313,7 @@
       subroutine do_electron_conduction_blouin( &
          zbar, logRho, logT, &
          kap, dlnkap_dlnRho, dlnkap_dlnT, ierr)
-         use const_def, only: dp
+         use const_def, only: dp, ln10
          use auto_diff
          real(dp), intent(in) :: zbar ! average ionic charge (for electron conduction)
          real(dp), intent(in) :: logRho ! the density
@@ -346,9 +346,9 @@
          ! var2: lnT
 
          logRho_auto = logRho
-         logRho_auto% d1val1 = iln10
+         logRho_auto% d1val1 = ln10
          logT_auto = logT
-         logT_auto% d1val2 = iln10
+         logT_auto% d1val2 = ln10
 
          ! call previous standard routines (Cassisi/Potekhin)
          call do_electron_conduction_potekhin( &

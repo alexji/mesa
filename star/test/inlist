@@ -5,6 +5,12 @@
       mesa_dir = '../..'  ! use current mesa_dir for test
       
       show_log_description_at_start = .false. 
+      
+      !change_initial_net = .true.
+      !new_net_name = 'basic.net'
+      !new_net_name = 'mesa_67.net'
+      !new_net_name = 'mesa_128.net'
+      !new_net_name = 'mesa_235.net'
 
 / ! end of star_job namelist
 
@@ -44,8 +50,9 @@
       !terminal_interval = 1
       
       
-      !use_DGESVX_in_bcyclic = .true.
-      !use_equilibration_in_DGESVX = .true.
+      !mix_factor = 0d0
+      !dxdt_nuc_factor = 0d0
+      x_logical_ctrl(19) = .true. ! testing abtilu
       
 
       stop_for_bad_nums = .true.

@@ -40,8 +40,6 @@
 
 
       contains
-      
-      
 
 
       subroutine solver( &
@@ -146,7 +144,6 @@
             rhs1, ddx1, xder1, &
             save_blks, save_ublk1, save_dblk1, save_lblk1
          integer, dimension(:), pointer :: ipiv1
-         integer, dimension(:), pointer :: ipiv_blk1
          character (len=s%nz) :: equed1
 
          real(dp), dimension(:,:), pointer :: A, Acopy
@@ -1022,6 +1019,165 @@
                end do
             end do
          end subroutine apply_coeff
+         
+         
+         subroutine test_solve_abtilu()
+            use abtilu, only: &
+               solve_abtilu, show_vec, test_abtilu, write_MUMPS_file
+            use star_bcyclic, only: bcyclic_factor, bcyclic_solve
+            integer :: itr_max, mr, &
+               num_sweeps_factor, num_sweeps_solve
+            logical :: &
+               debug, use_A, verbose, equilibrate, use_mgmres, write_MUMPS
+            real(dp) :: tol_abs, tol_rel
+            integer :: ierr, nz_test, i, iters, neq
+            real(dp), allocatable :: A(:,:)
+            integer(8) :: time0, time1, clock_rate
+            include 'formats'
+            ierr = 0
+
+            call test_abtilu(); return
+            
+            mr = 30
+            itr_max = 100
+            
+            tol_abs = 1d-14
+            tol_rel = 1d-14
+            
+            !tol_abs = 1d-12
+            !tol_rel = 1d-12
+            
+            !debug = .true.
+            debug = .false.
+            
+            verbose = .true.
+            
+            equilibrate = .true.
+            
+            use_mgmres = .true.
+            !use_mgmres = .false.
+            
+            if (use_mgmres) then
+               num_sweeps_factor = 1 ! 1 is ok for mgmres
+            else
+               num_sweeps_factor = 3 ! Bi_CG_Stab needs 3 even for toy tests
+            end if
+            num_sweeps_solve = 3
+            
+            use_A = .false.
+            
+            write_MUMPS = .false.
+            
+            
+            nz_test = 500 ! 600 okay. 700 stalls. 
+            ! the following results are for left preconditioned.
+            ! 100 ok, but 200 fails for right.  weird.
+            ! with tol 1d-14
+            ! 500  1 sweeps solve takes 44*30 + 30 tries
+            ! 500  2 sweeps solve takes 27*30 + 20 tries
+            ! 500  3 sweeps solve takes 24*30 + 12 tries
+            ! 500  6 sweeps solve takes 14*30 +  4 tries
+            ! 500 12 sweeps solve takes  6*30 + 16 tries
+            ! 500 24 sweeps solve takes  2*30 + 20 tries
+            ! 500 48 sweeps solve takes  1*30 + 12 tries
+            ! 500 96 sweeps solve takes  1*30 +  1 tries
+            ! increasing sweeps factor makes it worse
+            
+            neq = nvar*nz_test
+            
+            do i=1,nvar
+               write(*,2) trim(s% nameofvar(i)), i
+            end do
+            
+            if (debug .and. use_A) then
+               num_sweeps_factor = 6
+               num_sweeps_solve = 6
+               allocate(A(neq,neq))
+               A(neq,neq) = 0d0
+               call copy_lower_to_square(nvar,nz_test,lblk,A)
+               call copy_diag_to_square(nvar,nz_test,dblk,A)  
+               call copy_upper_to_square(nvar,nz_test,ublk,A)
+            else
+               allocate(A(1,1))
+            end if
+
+            !$omp simd
+            do i = 1, nvar*nvar*nz
+               save_ublk1(i) = ublk1(i)
+               save_dblk1(i) = dblk1(i)
+               save_lblk1(i) = lblk1(i)
+            end do
+         
+            !$omp simd
+            do i=1,neq
+               b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+            end do
+            
+            if (nz < 700) then ! skip this and just write the mumps file
+
+               call solve_abtilu( &            
+                  use_mgmres, nvar, nz_test, A, &
+                  ublk, dblk, lblk, b1, &
+                  equilibrate, verbose, debug, &
+                  num_sweeps_factor, num_sweeps_solve, &
+                  itr_max, mr, tol_abs, tol_rel, &
+                  soln1, iters, ierr)
+               if (ierr /= 0) stop 'solve_abtilu failed'
+               
+               !$omp simd
+               do i = 1, nvar*nvar*nz
+                  ublk1(i) = save_ublk1(i)
+                  dblk1(i) = save_dblk1(i)
+                  lblk1(i) = save_lblk1(i)
+               end do
+                           
+               !$omp simd
+               do i=1,neq
+                  b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+               end do
+            
+            end if
+            
+            
+            call system_clock(time0,clock_rate)
+            
+            call bcyclic_factor( &
+               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+               B1, row_scale_factors1, col_scale_factors1, &
+               equed1, iter, ierr)
+            if (ierr /= 0) stop 'bcyclic_factor failed'
+            
+            call bcyclic_solve( &
+               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+               b1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
+               iter, ierr)
+            if (ierr /= 0) stop 'bcyclic_solve failed'
+            
+            call system_clock(time1,clock_rate)
+            write(*,'(a,f15.9)') ' bcyclic factor+solve elapsed time', dble(time1-time0)/clock_rate
+            write(*,2) 'nvar', nvar
+            write(*,2) 'nz_test', nz_test
+            write(*,2) 'neq', neq
+                        
+            if (write_MUMPS) then
+               !$omp simd
+               do i = 1, nvar*nvar*nz
+                  ublk1(i) = save_ublk1(i)
+                  dblk1(i) = save_dblk1(i)
+                  lblk1(i) = save_lblk1(i)
+               end do
+               !$omp simd
+               do i=1,neq
+                  b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+               end do
+               call write_MUMPS_file( &
+                  nvar, nz_test, ublk, dblk, lblk, b1, soln1, 'test_star_mumps.txt')
+               write(*,*) 'test_star_mumps.txt'
+            end if
+            
+            stop 'testing solve_abtilu from star_solver'
+         
+         end subroutine test_solve_abtilu
 
 
          logical function solve_equ()
@@ -1032,6 +1188,11 @@
             include 'formats'
             ierr = 0
             solve_equ = .true.
+            
+            done = .false.
+            if (s% x_logical_ctrl(19)) then ! testing abtilu
+               call test_solve_abtilu()
+            end if
 
             if (s% doing_timing) then
                call start_time(s, time0, total_time)
@@ -1041,27 +1202,6 @@
             do i=1,neq
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
-            
-            done = .false.
-            if (.false.) then ! testing GMRES
-            
-               ! preconditioning
-               ! The special case of block tridiagonality
-               ! http://www.netlib.org/linalg/html_templates/node72.html
-            
-               soln1(1:neq) = 0d0 ! simplest initial guess for now
-               call solve_mtx_eqn_with_GMRES( &
-                  s, nvar, nz, b1, soln1, lblk, dblk, ublk, &
-                  3*nvar*neq, save_blks, dblkF1, ipiv1, ierr)
-                  ! use save_blks, dblkF1, ipiv1 as work arrays
-            
-               if (ierr /= 0) then
-                  ierr = 0
-               else
-                  done = .true.
-               end if
-            
-            end if
             
             if (.not. done) then
             
@@ -1103,7 +1243,7 @@
             use star_bcyclic, only: bcyclic_factor
             integer, intent(out) :: ierr
             call bcyclic_factor( &
-               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv_blk1, &
+               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
                B1, row_scale_factors1, col_scale_factors1, &
                equed1, iter, ierr)
          end subroutine factor_mtx
@@ -1113,7 +1253,7 @@
             use star_bcyclic, only: bcyclic_solve
             integer, intent(out) :: ierr
             call bcyclic_solve( &
-               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv_blk1, &
+               s, nvar, nz, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
                B1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
                iter, ierr)
          end subroutine solve_mtx
@@ -1913,8 +2053,6 @@
                return
             end if
 
-            ipiv_blk1(1:neq) => ipiv1(1:neq)
-
             A(1:3*nvar,1:neq) => A1(1:3*nvar*neq)
             Acopy1 => A1
             Acopy => A
@@ -1968,160 +2106,6 @@
       end subroutine do_solver
 
 
-      subroutine solve_mtx_eqn_with_GMRES( &
-            s, nvar, nz, rhs1, soln1, lblk, dblk, ublk, &
-            nwrk, wrk1, pcond1, ipiv1, ierr)
-         type (star_info), pointer :: s
-         integer, intent(in) :: nvar, nz, nwrk
-         real(dp), intent(in) :: rhs1(:) ! the right hand side of the linear system
-         real(dp), intent(inout) :: soln1(:)
-            ! on input, an approximation to the solution. 
-            ! on output, an improved approximation.
-         real(dp), intent(in), dimension(:,:,:), pointer :: lblk, dblk, ublk ! (nvar,nz)
-         real(dp), intent(out), dimension(:), pointer :: wrk1, pcond1 ! (nwrk)
-         integer, intent(out), dimension(:), pointer :: ipiv1 ! (nwrk)
-         integer, intent(out) :: ierr
-         integer :: neq, i, itr_max, mr
-         real(dp) :: tol_abs, tol_rel
-         real(dp), dimension(:), pointer :: &
-            work, r, cs, g, sn, y, v1, h1, b1, prod1
-         real(dp), dimension(:,:), pointer :: v, h, b, prod
-         real(dp), dimension(:,:,:), pointer :: pcond
-         integer, dimension(:,:), pointer :: ipiv
-         include 'formats'
-         ierr = 0
-         itr_max = 20
-         tol_abs = 1.0D-08
-         tol_rel = 1.0D-08
-         neq = nvar*nz
-         mr = min(neq-1, 20) 
-         work => wrk1
-         i = 1
-         r(1:neq) => work(i:i+neq-1); i = i+neq
-         cs(1:mr) => work(i:i+mr-1); i = i+mr
-         sn(1:mr) => work(i:i+mr-1); i = i+mr
-         g(1:mr+1) => work(i:i+mr); i = i+mr+1
-         y(1:mr+1) => work(i:i+mr); i = i+mr+1
-         v1(1:neq*(mr+1)) => work(i:i+neq*(mr+1)-1); i = i+neq*(mr+1)
-         v(1:neq,1:mr+1) => v1(1:neq*(mr+1))
-         h1(1:(mr+1)*mr) => work(i:i+(mr+1)*mr-1); i = i+(mr+1)*mr
-         h(1:mr+1,1:mr) => v1(1:(mr+1)*mr)
-         b1(1:neq) => work(i:i+neq-1); i = i+neq
-         b(1:nvar,1:nz) => b1(1:neq)
-         prod1(1:neq) => work(i:i+neq-1); i = i+neq
-         prod(1:nvar,1:nz) => prod1(1:neq)
-         pcond(1:nvar,1:nvar,1:nz) => pcond1(1:nvar*neq)
-         ipiv(1:nvar,1:nz) => ipiv1(1:neq)
-         
-         if (i > nwrk) then
-            write(*,2) 'i', i
-            write(*,2) 'nwrk', nwrk
-            stop 'i > nwrk in solve_mtx_eqn_with_GMRES'
-         end if
-         
-         call create_pcond(ierr)
-         if (ierr /= 0) then
-            stop 'create_pcond failed in solve_mtx_eqn_with_GMRES'
-         end if
-
-         call mgmres ( &
-            neq, matvec, psolve, soln1, rhs1, itr_max, mr, tol_abs, tol_rel, &
-            r, v, cs, g, h, sn, y, ierr )
-         
-         contains
-   
-         subroutine create_pcond(ierr) ! factor each dblk
-            use star_bcyclic, only: my_getf2_n4, my_getf2_n5, my_getf2
-            integer, intent(out) :: ierr
-            integer :: i, j, k, op_err
-            ierr = 0
-            !$OMP PARALLEL DO private(i,j,k,op_err)
-            do k=1,nz
-               do j=1,nz
-                  !$omp simd
-                  do i=1,nz
-                     pcond(i,j,k) = dblk(i,j,k)
-                  end do
-               end do
-               op_err = 0
-               if (nvar == 4) then
-                  call my_getf2_n4(pcond(:,:,k), ipiv(:,k), op_err)
-               else if (nvar == 5) then
-                  call my_getf2_n5(pcond(:,:,k), ipiv(:,k), op_err)
-               else
-                  call my_getf2(nvar, pcond(:,:,k), nvar, ipiv(:,k), op_err)
-               end if
-               if (op_err /= 0) ierr = op_err
-            end do
-            !$OMP END PARALLEL DO
-         end subroutine create_pcond
-   
-         subroutine psolve(x1) ! set x = pcond*x
-            use star_bcyclic, only: my_getrs1_n4, my_getrs1_n5, my_getrs1
-            real(dp), intent(inout) :: x1(:) ! (neq)
-            integer :: i, k, op_err
-            ierr = 0
-            return
-            !$OMP PARALLEL DO private(i,k,op_err)
-            do k=1,nz
-               i = nvar*(k-1)
-               op_err = 0
-               if (nvar == 4) then
-                  call my_getrs1_n4( &
-                     pcond(:,:,k), ipiv(:,k), x1(i+1:i+nvar), op_err)
-               else if (nvar == 5) then
-                  call my_getrs1_n5( &
-                     pcond(:,:,k), ipiv(:,k), x1(i+1:i+nvar), op_err)
-               else
-                  call my_getrs1( &
-                     nvar, pcond(:,:,k), nvar, ipiv(:,k), x1(i+1:i+nvar), nvar, op_err)
-               end if
-               if (op_err /= 0) ierr = op_err
-            end do
-            !$OMP END PARALLEL DO
-         end subroutine psolve
-   
-         subroutine matvec(x, r) ! set r = Jacobian*x
-            real(dp), intent(in) :: x(:) ! (neq)
-            real(dp), intent(out) :: r(:) ! (neq)
-            integer :: i
-            include 'formats'
-            !$omp simd
-            do i=1,neq
-               b1(i) = x(i)
-            end do   
-            call do_block_dble_mv(nvar, nz, lblk, dblk, ublk, b, prod)      
-            !$omp simd
-            do i=1,neq
-               r(i) = prod1(i)
-            end do                  
-         end subroutine matvec
-
-         subroutine do_block_dble_mv(nvar, nz, lblk, dblk, ublk, b, prod)
-            ! set prod = A*b with A = block tridiagonal given by lblk, dblk, ublk
-            use star_bcyclic, only: my_gemv_p1
-            integer, intent(in) :: nvar, nz    
-            real(dp), pointer, dimension(:,:,:), intent(in) :: lblk, dblk, ublk ! (nvar,nvar,nz)
-            real(dp), pointer, dimension(:,:), intent(in) :: b ! (nvar,nz)
-            real(dp), pointer, dimension(:,:), intent(inout) :: prod ! (nvar,nz)         
-            integer :: k        
-            !$OMP PARALLEL DO PRIVATE(k)
-            do k = 1, nz
-               prod(1:nvar,k) = 0
-               call my_gemv_p1(nvar,nvar,dblk(:,:,k),nvar,b(:,k),prod(:,k))
-               if (k > 1) then
-                  call my_gemv_p1(nvar,nvar,lblk(:,:,k),nvar,b(:,k-1),prod(:,k))
-               end if
-               if (k < nz) then
-                  call my_gemv_p1(nvar,nvar,ublk(:,:,k),nvar,b(:,k+1),prod(:,k))
-               end if
-            end do      
-            !$OMP END PARALLEL DO         
-         end subroutine do_block_dble_mv                  
-            
-      end subroutine solve_mtx_eqn_with_GMRES
-
-
       subroutine get_solver_work_sizes(s, nvar, nz, lwork, liwork, ierr)
          type (star_info), pointer :: s
          integer, intent(in) :: nvar, nz
@@ -2132,256 +2116,6 @@
          liwork = neq
          lwork = neq*(7*nvar + 10)
       end subroutine get_solver_work_sizes
-
-
-      !*****************************************************************************
-      !
-      !  MGMRES applies restarted GMRES.   derived from MGMRES_ST
-      !
-      !  Discussion of MGMRES_ST:
-      !
-      !    The linear system A*X=B is solved iteratively.
-      !
-      !    The matrix A is assumed to be stored in sparse triplet form.  Only
-      !    the nonzero entries of A are stored.  For instance, the K-th nonzero
-      !    entry in the matrix is stored by:
-      !
-      !      A(K) = value of entry,
-      !      IA(K) = row of entry,
-      !      JA(K) = column of entry.
-      !
-      !    Thanks to Jesus Pueblas Sanchez-Guerra for supplying two
-      !    corrections to the code on 31 May 2007.
-      !
-      !  Licensing:
-      !
-      !    This code is distributed under the GNU LGPL license.
-      !
-      !  Modified:
-      !
-      !    13 July 2007
-      !
-      !  Author:
-      !
-      !    Original C version by Lili Ju.
-      !    FORTRAN90 version by John Burkardt.
-      !
-      !  Reference:
-      !
-      !    Richard Barrett, Michael Berry, Tony Chan, James Demmel,
-      !    June Donato, Jack Dongarra, Victor Eijkhout, Roidan Pozo,
-      !    Charles Romine, Henk van der Vorst,
-      !    Templates for the Solution of Linear Systems:
-      !    Building Blocks for Iterative Methods,
-      !    SIAM, 1994.
-      !    ISBN: 0898714710,
-      !    LC: QA297.8.T45.
-      !
-      !    Tim Kelley,
-      !    Iterative Methods for Linear and Nonlinear Equations,
-      !    SIAM, 2004,
-      !    ISBN: 0898713528,
-      !    LC: QA297.8.K45.
-      !
-      !    Yousef Saad,
-      !    Iterative Methods for Sparse Linear Systems,
-      !    Second Edition,
-      !    SIAM, 2003,
-      !    ISBN: 0898715342,
-      !    LC: QA188.S17.
-      !
-      !  Parameters:
-      !
-      !    Input, integer :: N, the order of the linear system.
-      !
-      !    Input, integer :: NZ_NUM, the number of nonzero matrix values.
-      !
-      !    Input, integer :: IA(NZ_NUM), JA(NZ_NUM), the row and column
-      !    indices of the matrix values.
-      !
-      !    Input, real(dp) :: A(NZ_NUM), the matrix values.
-      !
-      !    Input/output, real(dp) :: X(N); on input, an approximation to
-      !    the solution.  On output, an improved approximation.
-      !
-      !    Input, real(dp) :: RHS(N), the right hand side of the linear system.
-      !
-      !    Input, integer :: ITR_MAX, the maximum number of (outer)
-      !    iterations to take.
-      !
-      !    Input, integer :: MR, the maximum number of (inner) iterations
-      !    to take.  0 < MR <= N.
-      !
-      !    Input, real(dp) :: TOL_ABS, an absolute tolerance applied to the
-      !    current residual.
-      !
-      !    Input, real(dp) :: TOL_REL, a relative tolerance comparing the
-      !    current residual to the initial residual.
-      !
       
-      subroutine mgmres ( &
-            n, matvec, psolve, x, rhs, itr_max, mr, tol_abs, tol_rel, &
-            r, v, c, g, h, s, y, ierr )
-         integer, intent(in) :: n
-         interface
-            subroutine matvec(x, r) ! set r = A*x
-               use const_def, only: dp
-               real(dp), intent(in) :: x(:)
-               real(dp), intent(out) :: r(:)
-            end subroutine matvec
-            subroutine psolve(x) ! set x = Precond*x
-               use const_def, only: dp
-               real(dp), intent(inout) :: x(:)
-            end subroutine psolve
-         end interface
-         real(dp), intent(inout) :: x(:) ! (n)   initial guess on input, result on output
-         real(dp), intent(in) :: rhs(:) ! (n)
-         real(dp), intent(out), dimension(:) :: r, c, g, s, y
-         real(dp), intent(out), dimension(:,:) :: v, h
-         integer, intent(in) :: itr_max, mr
-         real(dp), intent(in) :: tol_abs, tol_rel
-         integer, intent(out) :: ierr
-         
-         real(dp) :: av, mu, rho, rho_tol, htmp
-         integer :: i, itr, itr_used, j, k, k_copy
-         real(dp), parameter :: delta = 1.0D-03
-         logical, parameter :: verbose = .true.
-         include 'formats'
-         ierr = 0
-         itr_used = 0
-         if ( n < mr ) then
-            write ( *, '(a)' ) ' '
-            write ( *, '(a)' ) 'MGMRES_ST - Fatal error!'
-            write ( *, '(a)' ) '  N < MR.'
-            write ( *, '(a,i8)' ) '  N = ', n
-            write ( *, '(a,i8)' ) '  MR = ', mr
-            stop
-         end if
-         do itr = 1, itr_max ! loop back to here for restarts
-            call matvec ( x, r )
-            !$omp simd
-            do j=1,n
-               r(j) = rhs(j) - r(j)
-            end do
-            call psolve ( r ) ! apply pcond to residual
-            rho = sqrt ( dot_product ( r(1:n), r(1:n) ) )
-            if ( verbose ) &
-               write ( *, '(a,i8,a,g14.6)' ) '  ITR = ', itr, '  Residual = ', rho
-            if (is_bad(rho)) then
-               ierr = -1
-               return
-            end if
-            if ( itr == 1 ) rho_tol = rho * tol_rel
-            if ( rho <= rho_tol .and. rho <= tol_abs ) exit
-            !$omp simd
-            do j=1,n
-               v(j,1) = r(j) / rho
-            end do
-            g(1) = rho
-            g(2:mr+1) = 0.0D+00
-            h(1:mr+1,1:mr) = 0.0D+00
-            k_copy = 1 ! to avoid compiler warnings
-            do k = 1, mr
-               k_copy = k
-               call matvec ( v(1:n,k), v(1:n,k+1) )
-               call psolve ( v(1:n,k+1) ) ! apply pcond to result of matvec
-               av = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-               do j = 1, k
-                  h(j,k) = dot_product ( v(1:n,k+1), v(1:n,j) )
-                  !$omp simd
-                  do i=1,n
-                     v(i,k+1) = v(i,k+1) - h(j,k) * v(i,j)
-                  end do
-               end do
-               h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-               if ( av + delta * h(k+1,k) == av ) then
-                  do j = 1, k
-                     htmp = dot_product ( v(1:n,k+1), v(1:n,j) )
-                     h(j,k) = h(j,k) + htmp
-                     !$omp simd
-                     do i=1,n
-                        v(i,k+1) = v(i,k+1) - htmp * v(i,j)
-                     end do
-                  end do
-                  h(k+1,k) = sqrt ( dot_product ( v(1:n,k+1), v(1:n,k+1) ) )
-               end if
-               if ( h(k+1,k) /= 0.0D+00 ) then
-                  !$omp simd
-                  do i=1,n
-                     v(i,k+1) = v(i,k+1) / h(k+1,k)
-                  end do
-               end if
-               if ( 1 < k ) then
-                  !$omp simd
-                  do i=1,k+1
-                     y(i) = h(i,k)
-                  end do
-                  do j = 1, k - 1
-                     call mult_givens ( c(j), s(j), j, y(1:k+1) )
-                  end do
-                  !$omp simd
-                  do i=1,k+1
-                     h(i,k) = y(i)
-                  end do
-               end if
-               mu = sqrt ( pow2(h(k,k)) + pow2(h(k+1,k)) )
-               if (mu == 0d0 .or. is_bad(mu)) then
-                  if (verbose) write(*,2) 'gmres mu', k, mu
-                  ierr = -1
-                  return
-               end if
-               c(k) = h(k,k) / mu
-               s(k) = -h(k+1,k) / mu
-               h(k,k) = c(k) * h(k,k) - s(k) * h(k+1,k)
-               h(k+1,k) = 0.0D+00
-               call mult_givens ( c(k), s(k), k, g(1:k+1) )
-               rho = abs ( g(k+1) )
-               itr_used = itr_used + 1
-               if ( verbose ) then
-                  write ( *, '(a,i8,a,g14.6)' ) '  K =   ', k, '  Residual = ', rho
-               end if
-               if (is_bad(rho)) then
-                  write(*,2) 'gmres rho', k, rho
-                  write(*,2) 'c(k)', k, c(k)
-                  write(*,2) 's(k)', k, s(k)
-                  write(*,2) 'g(k+1)', k+1, g(k+1)
-                  write(*,2) 'g(k)', k, g(k)
-                  stop 'MGMRES'
-               end if
-               if ( rho <= rho_tol .and. rho <= tol_abs ) exit
-            end do ! k loop
-            k = k_copy - 1
-            y(k+1) = g(k+1) / h(k+1,k+1)
-            do i = k, 1, -1
-               y(i) = ( g(i) - dot_product ( h(i,i+1:k+1), y(i+1:k+1) ) ) / h(i,i)
-            end do
-            do i = 1, n
-               x(i) = x(i) + dot_product ( v(i,1:k+1), y(1:k+1) )
-            end do
-            if ( rho <= rho_tol .and. rho <= tol_abs ) exit
-            ! else restart
-         end do
-         if ( verbose ) then
-            write ( *, '(a)'       ) ' '
-            write ( *, '(a)'       ) 'MGMRES:'
-            write ( *, '(a,i8)'    ) '  Iterations = ', itr_used
-            write ( *, '(a,g14.6)' ) '  Final residual = ', rho
-         end if
-         
-         contains
-         
-         subroutine mult_givens ( c, s, k, g )
-            real(dp), intent(in) :: c, s ! cos and sin
-            integer, intent(in) :: k
-            real(dp), intent(inout) :: g(:) ! (1:k+1)
-            real(dp) :: g1, g2
-            g1 = c * g(k) - s * g(k+1)
-            g2 = s * g(k) + c * g(k+1)
-            g(k)   = g1
-            g(k+1) = g2
-         end subroutine mult_givens
-         
-      end subroutine mgmres
-
-
+      
       end module star_solver
