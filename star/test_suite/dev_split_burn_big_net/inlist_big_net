@@ -10,8 +10,9 @@
       required_termination_code_string = 'xa_central_lower_limit'
 
       change_initial_net = .true.
+      new_net_name = 'mesa_495.net'
       !new_net_name = 'mesa_201.net'
-      new_net_name = 'mesa_80.net' ! good enough for testing
+      !new_net_name = 'mesa_80.net' ! good enough for testing
 
       set_initial_age = .true.
       initial_age = 0

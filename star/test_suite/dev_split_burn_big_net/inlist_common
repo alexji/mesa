@@ -186,6 +186,21 @@
       burn_steps_hard_limit = 250
       op_split_burn_eps = 1d-5
       op_split_burn_odescal = 1d-5
+
+
+
+
+      op_split_burn_min_T = 1d6
+
+      min_chem_eqn_scale = 1d-16
+      x_logical_ctrl(19) = .true. ! testing abtilu
+
+
+
+
+
+
+
       
 ! GYRE output controls
       !write_pulse_data_with_profile = .true.

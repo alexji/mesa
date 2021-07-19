@@ -34,8 +34,10 @@
 
       private
       public :: test_abtilu, &
-         solve_abtilu, show_vec, write_MM_mxt, write_MM_vec, write_MUMPS_file, &
-         copy_lower_to_square, copy_diag_to_square, copy_upper_to_square
+         solve_abtilu, show_vec, &
+         get_MM_filename, write_MM_mxt, write_MM_vec, write_MUMPS_file, &
+         copy_lower_to_square, copy_diag_to_square, copy_upper_to_square, &
+         get_scaling_vectors, apply_scaling_vectors, block_tridiag_mv1
 
 
       contains      
@@ -1106,12 +1108,12 @@
          call for_each_nonzero(.true.) ! output nonzeros
          ! write the rhs
          do i=1,neq
-            write(iounit, '(1e26.16)') rhs1(i)
+            write(iounit, '(1e26.16)') check(rhs1(i))
          end do
          if (size(soln1,dim=1) >= neq) then ! write the soln
             write(iounit, '(i8)') neq
             do i=1,neq
-               write(iounit, '(1e26.16)') soln1(i)
+               write(iounit, '(1e26.16)') check(soln1(i))
             end do
          else
             write(iounit, '(i8)') 0
@@ -1119,6 +1121,15 @@
          close(iounit)
          
          contains
+         
+         real(dp) function check(v)
+            real(dp), intent(in) :: v
+            if (abs(v) < 1d-99) then
+               check = 0d0
+            else
+               check = v
+            end if
+         end function check
          
          subroutine for_each_nonzero(write_flag)
             logical, intent(in) :: write_flag
@@ -1150,9 +1161,11 @@
             integer, intent(in) :: r, c
             real(dp), intent(in) :: v
             logical, intent(in) :: write_flag
-            if (v == 0d0) return
+            real(dp) :: x
+            x = check(v)
+            if (x == 0d0) return
             if (write_flag) then
-               write(iounit, '(2i8,1e26.16)') r, c, v
+               write(iounit, '(2i8,1e26.16)') r, c, x
             else
                non_zeros = non_zeros + 1
             end if
@@ -1162,24 +1175,34 @@
 
       
       subroutine write_MM_mxt( &
-            nvar, nz, ublk, dblk, lblk, filename)
+            nvar, nz, ublk, dblk, lblk, filename, non_zeros)
          integer, intent(in) :: nvar, nz
          real(dp), dimension(:,:,:), intent(in) :: & ! (nvar,nvar,nz)
             ublk, dblk, lblk
          character (len=*), intent(in) :: filename
-         integer :: neq, non_zeros, iounit
+         integer, intent(out) :: non_zeros
+         integer :: neq, iounit
          neq = nvar*nz
          non_zeros = 0d0
          call for_each_nonzero(.false.)
          
          open(newunit=iounit, file=trim(filename), action='write', status='replace')
-         write(iounit, '(a)') '%%MatrixMarket matrix coordinate double general'
-         write(iounit, '(a)') '%from mesa/star abtilu'
+         write(iounit, '(a)') '%%MatrixMarket matrix coordinate real general'
+         write(iounit, '(a)') '% mesa/star'
          write(iounit, '(3i8)') neq, neq, non_zeros
          call for_each_nonzero(.true.)
          close(iounit)
          
          contains
+         
+         real(dp) function check(v)
+            real(dp), intent(in) :: v
+            if (abs(v) < 1d-99) then
+               check = 0d0
+            else
+               check = v
+            end if
+         end function check
          
          subroutine for_each_nonzero(write_flag)
             logical, intent(in) :: write_flag
@@ -1211,9 +1234,11 @@
             integer, intent(in) :: r, c
             real(dp), intent(in) :: v
             logical, intent(in) :: write_flag
-            if (v == 0d0) return
+            real(dp) :: x
+            x = check(v)
+            if (x == 0d0) return
             if (write_flag) then
-               write(iounit, '(2i8,1e26.16)') r, c, v
+               write(iounit, '(2i8,1e26.16)') r, c, x
             else
                non_zeros = non_zeros + 1
             end if
@@ -1225,57 +1250,41 @@
          integer, intent(in) :: nvar, nz
          real(dp), dimension(:), intent(in) :: b1 ! (nvar*nz)
          character (len=*), intent(in) :: filename
-         integer :: neq, non_zeros, iounit
-         neq = nvar*nz
-         non_zeros = 0d0
-         call for_each_nonzero(.false.)
-         
+         integer :: neq, k, iounit
+         neq = nvar*nz         
          open(newunit=iounit, file=trim(filename), action='write', status='replace')
-         write(iounit, '(a)') '%%MatrixMarket matrix coordinate double general'
-         write(iounit, '(a)') '%from mesa/star abtilu'
-         write(iounit, '(3i8)') 1, neq, non_zeros
-         call for_each_nonzero(.true.)
+         write(iounit, '(a)') '%%MatrixMarket matrix array real general'
+         write(iounit, '(a)') '% mesa/star'
+         write(iounit, '(2i8)') neq, 1
+         do k=1,neq
+            write(iounit, '(1e26.16)') check(b1(k))
+         end do
          close(iounit)
          
          contains
          
-         subroutine for_each_nonzero(write_flag)
-            logical, intent(in) :: write_flag
-            integer :: j, k, c
-            do k=1,nz
-               if (k > 1) then
-                  c = (k-2)*nvar
-                  do j=1,nvar
-                     call do1(c+j, write_flag)
-                  end do
-               end if
-               c = (k-1)*nvar
-               do j=1,nvar
-                  call do1(c+j, write_flag)
-               end do
-               if (k < nz) then
-                  c = k*nvar
-                  do j=1,nvar
-                     call do1(c+j, write_flag)
-                  end do
-               end if
-            end do
-         end subroutine for_each_nonzero
-         
-         subroutine do1(c,write_flag)
-            integer, intent(in) :: c
-            logical, intent(in) :: write_flag
-            real(dp) :: v
-            v = b1(c)
-            if (v == 0d0) return
-            if (write_flag) then
-               write(iounit, '(2i8,1e26.16)') 1, c, v
+         real(dp) function check(v)
+            real(dp), intent(in) :: v
+            if (abs(v) < 1d-99) then
+               check = 0d0
             else
-               non_zeros = non_zeros + 1
+               check = v
             end if
-         end subroutine do1
-         
+         end function check
+
       end subroutine write_MM_vec
+         
+      subroutine get_MM_filename(str, nvar, fname)
+         character(len=*) :: str, fname
+         integer :: nvar
+         if (nvar < 10) then
+            write(fname,'(a,i1,a)') trim(str) // '_nvar_00', nvar, '.mm'
+         else if (nvar < 100) then
+            write(fname,'(a,i2,a)') trim(str) // '_nvar_0', nvar, '.mm'
+         else 
+            write(fname,'(a,i3,a)') trim(str) // '_nvar_', nvar, '.mm'
+         end if
+      end subroutine get_MM_filename
 
 
 !*****************************************************************************
@@ -1876,6 +1885,33 @@
          end subroutine setup_test_matrix_nvar1
          
       end subroutine test_abtilu_nvar1
+
+
+      subroutine test_abtilu_toy1( &
+            use_mgmres, equilibrate, verbose, debug, &
+            num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, round)
+         use utils_lib, only: fill_with_NaNs, fill_with_NaNs_2D, fill_with_NaNs_3D
+         logical, intent(in) :: equilibrate, verbose, debug, use_mgmres
+         integer, intent(in) :: num_sweeps_factor, num_sweeps_solve, itr_max, mr, round
+         real(dp), intent(in) :: tol_abs, tol_rel
+         integer, parameter :: nvar = 1, nz = 1000
+         call do1_test_abtilu( &
+            use_mgmres, equilibrate, verbose, debug, nvar, nz, &
+            setup_test_matrix_toy1, num_sweeps_factor, num_sweeps_solve, &
+            itr_max, mr, tol_abs, tol_rel, round, 'test_toy1')
+            
+         contains
+
+         subroutine setup_test_matrix_toy1(A, ublk, dblk, lblk)
+            real(dp), dimension(:,:), intent(out) :: A
+            real(dp), dimension(:,:,:), intent(out) :: ublk, dblk, lblk
+            dblk = 2d0
+            ublk = -1d0
+            lblk = -1d0
+         end subroutine setup_test_matrix_toy1
+         
+      end subroutine test_abtilu_toy1
       
 
       subroutine test_abtilu_nvar2( &
@@ -1961,7 +1997,7 @@
          real(dp), dimension(:,:,:), allocatable :: ublk, dblk, lblk
          real(dp), dimension(:), allocatable :: &
             soln1, rhs1, actual_soln1
-         integer :: test, i, k, shft, ierr, iters, neq
+         integer :: test, i, k, shft, ierr, iters, neq, non_zeros
          logical :: write_mumps, write_mm
          real(dp) :: x_error, soln_error, error
          include 'formats'
@@ -1984,16 +2020,18 @@
          
          call setup_test_matrix(A, ublk, dblk, lblk)
 
-         write_mumps = .true.
-         write_mm = .false.
+         write_mumps = .false.
+         write_mm = .true.
          
          rhs1 = 1d0
          
+         if (.false.) then
          ! get solution from DGESVX
          call get_lapack_solution(neq, A, rhs1, actual_soln1, verbose, ierr)
          if (ierr /= 0) then
-            write(*,*) trim(str) // 'do1_test_abtilu failed in DGESVX'
+            write(*,*) trim(str) // ' do1_test_abtilu failed in DGESVX'
             stop 'do1_test_abtilu'
+         end if
          end if
             
          if (write_mumps) then
@@ -2003,8 +2041,8 @@
          
          if (write_mm) then
             call write_MM_mxt( &
-               nvar, nz, ublk, dblk, lblk, trim(str)//'_mtx.txt')
-            call write_MM_vec(nvar, nz, rhs1, trim(str)//'_rhs.txt')
+               nvar, nz, ublk, dblk, lblk, trim(str)//'_mtx.mm', non_zeros)
+            call write_MM_vec(nvar, nz, rhs1, trim(str)//'_rhs.mm')
          end if
 
          rhs1 = 1d0
@@ -2020,8 +2058,8 @@
             soln1, iters, ierr)
 
          if (write_mm) then
-            call write_MM_vec(nvar, nz, soln1, trim(str)//'_soln.txt')
-            call write_MM_vec(nvar, nz, actual_soln1, trim(str)//'_DGESVX_soln.txt')
+            call write_MM_vec(nvar, nz, soln1, trim(str)//'_soln.mm')
+            call write_MM_vec(nvar, nz, actual_soln1, trim(str)//'_DGESVX_soln.mm')
          end if
 
          x_error = norm2_of_diff(neq, actual_soln1, soln1)
@@ -2088,6 +2126,10 @@
             end if
             num_sweeps_solve = 3
 
+            call test_abtilu_toy1( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, 0)
             call test_abtilu_nvar1( &
                use_mgmres, equilibrate, verbose, debug, &
                num_sweeps_factor, num_sweeps_solve, &
@@ -2132,6 +2174,10 @@
             write(*,*) 'test_abtilu equilibrate', equilibrate
             do j=1,500
                !call test_Bi_CG_Stab
+            call test_abtilu_toy1( &
+               use_mgmres, equilibrate, verbose, debug, &
+               num_sweeps_factor, num_sweeps_solve, &
+               iter_max, mr, tol_abs, tol_rel, j)
             call test_abtilu_nvar1( &
                use_mgmres, equilibrate, verbose, debug, &
                num_sweeps_factor, num_sweeps_solve, &

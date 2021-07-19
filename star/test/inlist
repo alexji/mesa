@@ -6,11 +6,20 @@
       
       show_log_description_at_start = .false. 
       
-      !change_initial_net = .true.
+      change_initial_net = .true.
+      !new_net_name = 'mini.net'
       !new_net_name = 'basic.net'
+      !new_net_name = 'hot_cno.net'     ! nvar_20
+      
+      !new_net_name = 'cno_extras_o18_to_mg26_plus_fe56.net'   ! nvar_28
+      
+      
+      !new_net_name = 'mesa_14.net'
+      !new_net_name = 'mesa_28.net'
+      !new_net_name = 'mesa_45.net'
       !new_net_name = 'mesa_67.net'
       !new_net_name = 'mesa_128.net'
-      !new_net_name = 'mesa_235.net'
+      new_net_name = 'mesa_235.net'
 
 / ! end of star_job namelist
 
@@ -42,17 +51,26 @@
       max_model_number = 100
          
       max_age = 1d5 ! in years
-      
 
-      !photo_interval = 1
-      !profile_interval = 1
-      !history_interval = 1
-      !terminal_interval = 1
-      
       
       !mix_factor = 0d0
       !dxdt_nuc_factor = 0d0
+      min_chem_eqn_scale = 1d-16
       x_logical_ctrl(19) = .true. ! testing abtilu
+
+
+      op_split_burn = .true.
+      op_split_burn_min_T = 1d6
+      burn_steps_limit = 150
+      burn_steps_hard_limit = 250
+      op_split_burn_eps = 1d-5
+      op_split_burn_odescal = 1d-5
+
+      
+      !use_DGESVX_in_bcyclic = .true.
+      !use_equilibration_in_DGESVX = .true.
+      !report_min_rcond_from_DGESXV = .true.
+      
       
 
       stop_for_bad_nums = .true.
@@ -63,17 +81,13 @@
       !profile_interval = 1
       !history_interval = 1
       !terminal_interval = 1
-      
-      !x_integer_ctrl(19) = 29
-      !x_integer_ctrl(20) = 0
-      !x_integer_ctrl(21) = 0
 
 ! FOR DEBUGGING
 
       !report_solver_progress = .true. ! set true to see info about solver iterations
       !report_ierr = .true. ! if true, produce terminal output when have some internal error
       !stop_for_bad_nums = .true.
-      !trace_evolve = .true.
+      trace_evolve = .true.
       !fill_arrays_with_NaNs = .true.
 
       !solver_save_photo_call_number = 0

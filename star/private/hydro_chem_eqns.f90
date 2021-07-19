@@ -165,6 +165,7 @@
             ! all the rest are jacobian terms for dxdt_expected/eqn_scale
 
             if (s% do_burn) then
+            !if (s% do_burn .and. s% xa_start(j,k) > 1d-20) then
 
                do jj=1,species
                   ii = s% nvar_hydro+jj
@@ -201,6 +202,21 @@
                   call ep1(s, i, i, k, nvar, dxdt_factor*dequ)
                end if
 
+            end if
+
+            if (k == -2 .and. i == 1) then
+!$OMP critical (star_chem_eqns_bad_num)
+               write(*,3) 'do1_chem_eqns: equ ' // trim(s% nameofequ(i)), &
+                     i, k, s% equ(i,k)
+               write(*,2) 'dxdt_expected', k, dxdt_expected
+               write(*,2) 'dxdt_actual', k, dxdt_actual
+               write(*,2) 'eqn_scale', k, eqn_scale
+               write(*,2) 'dt', k, s% dt
+               write(*,2) 'min_chem_eqn_scale', k, s% min_chem_eqn_scale
+               write(*,2) 'dxdt_mix', k, dxdt_mix
+               write(*,2) 'dxdt_nuc', k, dxdt_nuc
+               !stop 'do1_chem_eqns'
+!$OMP end critical (star_chem_eqns_bad_num)
             end if
 
             if (test_partials) then   

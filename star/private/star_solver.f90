@@ -1023,20 +1023,26 @@
          
          subroutine test_solve_abtilu()
             use abtilu, only: &
-               solve_abtilu, show_vec, test_abtilu, write_MUMPS_file
+               solve_abtilu, show_vec, test_abtilu, block_tridiag_mv1, write_MUMPS_file, &
+               get_MM_filename, write_MM_mxt, write_MM_vec, &
+               get_scaling_vectors, apply_scaling_vectors
             use star_bcyclic, only: bcyclic_factor, bcyclic_solve
             integer :: itr_max, mr, &
                num_sweeps_factor, num_sweeps_solve
             logical :: &
-               debug, use_A, verbose, equilibrate, use_mgmres, write_MUMPS
-            real(dp) :: tol_abs, tol_rel
-            integer :: ierr, nz_test, i, iters, neq
+               debug, use_A, verbose, equilibrate, use_mgmres, write_MUMPS, write_MM
+            real(dp) :: tol_abs, tol_rel, norm2_residual, norm2_rhs, elasped_time_BCYCLIC
+            integer :: ierr, nz_test, i, iters, neq, non_zeros
             real(dp), allocatable :: A(:,:)
+            real(dp), dimension(:), allocatable :: DR, DC ! (neq)
             integer(8) :: time0, time1, clock_rate
+            character (len=128) :: fname
             include 'formats'
             ierr = 0
 
-            call test_abtilu(); return
+            !call test_abtilu(); return
+            
+            write(*,*) 'test_solve_abtilu'
             
             mr = 30
             itr_max = 100
@@ -1052,7 +1058,7 @@
             
             verbose = .true.
             
-            equilibrate = .true.
+            equilibrate = .false.
             
             use_mgmres = .true.
             !use_mgmres = .false.
@@ -1067,9 +1073,9 @@
             use_A = .false.
             
             write_MUMPS = .false.
+            write_MM = .true.
             
-            
-            nz_test = 500 ! 600 okay. 700 stalls. 
+            nz_test = nz ! 600 okay. 700 stalls. 
             ! the following results are for left preconditioned.
             ! 100 ok, but 200 fails for right.  weird.
             ! with tol 1d-14
@@ -1100,6 +1106,7 @@
             else
                allocate(A(1,1))
             end if
+            allocate(DR(neq), DC(neq))
 
             !$omp simd
             do i = 1, nvar*nvar*nz
@@ -1113,7 +1120,7 @@
                b1(i) = -equ1(i) ! b1 is rhs of matrix equation
             end do
             
-            if (nz < 700) then ! skip this and just write the mumps file
+            if (.false.) then
 
                call solve_abtilu( &            
                   use_mgmres, nvar, nz_test, A, &
@@ -1136,30 +1143,27 @@
                   b1(i) = -equ1(i) ! b1 is rhs of matrix equation
                end do
             
-            end if
-            
-            
-            call system_clock(time0,clock_rate)
-            
-            call bcyclic_factor( &
-               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
-               B1, row_scale_factors1, col_scale_factors1, &
-               equed1, iter, ierr)
-            if (ierr /= 0) stop 'bcyclic_factor failed'
-            
-            call bcyclic_solve( &
-               s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
-               b1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
-               iter, ierr)
-            if (ierr /= 0) stop 'bcyclic_solve failed'
-            
-            call system_clock(time1,clock_rate)
-            write(*,'(a,f15.9)') ' bcyclic factor+solve elapsed time', dble(time1-time0)/clock_rate
-            write(*,2) 'nvar', nvar
-            write(*,2) 'nz_test', nz_test
-            write(*,2) 'neq', neq
+               call system_clock(time0,clock_rate)
                         
-            if (write_MUMPS) then
+               call bcyclic_factor( &
+                  s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+                  B1, row_scale_factors1, col_scale_factors1, &
+                  equed1, iter, ierr)
+               if (ierr /= 0) stop 'bcyclic_factor failed'
+            
+               call bcyclic_solve( &
+                  s, nvar, nz_test, lblk1, dblk1, ublk1, lblkF1, dblkF1, ublkF1, ipiv1, &
+                  b1, soln1, row_scale_factors1, col_scale_factors1, equed1, &
+                  iter, ierr)
+               if (ierr /= 0) stop 'bcyclic_solve failed'
+            
+               call system_clock(time1,clock_rate)
+               elasped_time_BCYCLIC = dble(time1-time0)/clock_rate
+               write(*,'(a,f15.9)') ' bcyclic factor+solve elapsed time', elasped_time_BCYCLIC
+               write(*,2) 'nvar', nvar
+               write(*,2) 'nz_test', nz_test
+               write(*,2) 'neq', neq
+            
                !$omp simd
                do i = 1, nvar*nvar*nz
                   ublk1(i) = save_ublk1(i)
@@ -1170,14 +1174,158 @@
                do i=1,neq
                   b1(i) = -equ1(i) ! b1 is rhs of matrix equation
                end do
+            
+               call solve_with_DGBSVX(nvar, nz_test)
+            
+               !$omp simd
+               do i = 1, nvar*nvar*nz
+                  ublk1(i) = save_ublk1(i)
+                  dblk1(i) = save_dblk1(i)
+                  lblk1(i) = save_lblk1(i)
+               end do
+               !$omp simd
+               do i=1,neq
+                  b1(i) = -equ1(i) ! b1 is rhs of matrix equation
+               end do
+            
+            end if
+                        
+            if (write_MUMPS) then
                call write_MUMPS_file( &
                   nvar, nz_test, ublk, dblk, lblk, b1, soln1, 'test_star_mumps.txt')
                write(*,*) 'test_star_mumps.txt'
             end if
             
+            non_zeros = 0
+            if (write_MM) then
+               call get_MM_filename('test_A', nvar, fname)
+               call write_MM_mxt(nvar, nz_test, ublk, dblk, lblk, fname, non_zeros)
+               call get_MM_filename('test_b', nvar, fname)
+               call write_MM_vec(nvar, nz_test, b1, fname)
+               !call get_MM_filename('test_soln', nvar, fname)
+               !call write_MM_vec(nvar, nz_test, soln1, fname)
+               write(*,*) 'test_*.mm'
+               
+               if (.false.) then
+                  call get_scaling_vectors( &
+                     nvar, nz, lblk, dblk, ublk, & ! input
+                     DR, DC, ierr) ! output
+                  if (ierr /= 0) stop 'failed in get_scaling_vectors'
+                  call apply_scaling_vectors( &
+                     nvar, nz, DR, DC, & ! input
+                     lblk, dblk, ublk, & ! input/output
+                     ierr)
+                  if (ierr /= 0) stop 'failed in apply_scaling_vectors'
+                  !$omp simd
+                  do j=1,neq
+                     b1(j) = b1(j)*DR(j)
+                  end do
+                  !$omp simd
+                  do j=1,neq
+                     soln1(j) = soln1(j)*DC(j)
+                  end do
+               
+                  call write_MM_mxt(nvar, nz_test, ublk, dblk, lblk, 'test_eq_A.mm', non_zeros)
+                  call write_MM_vec(nvar, nz_test, b1, 'test_eq_b.mm')
+                  call write_MM_vec(nvar, nz_test, soln1, 'test_eq_soln.mm')
+                  write(*,*) 'test_eq_*.mm'
+               end if
+               
+            end if
+            
+            if (.false.) then
+               ! calc norm2(A*soln - b)/norm2(b)
+               call block_tridiag_mv1(nvar, nz_test, lblk, dblk, ublk, soln1, DR) ! DR = A*soln
+               !$omp simd
+               do j=1,neq
+                  DR(j) = DR(j) - b1(j)
+               end do
+               norm2_residual = sqrt(dot_product(DR(1:neq),DR(1:neq)))
+               norm2_rhs = sqrt(dot_product(b1(1:neq),b1(1:neq)))
+               write(*,'(a,i4,i7,i10, 99e12.4)') 'nvar, neq, nnz, nrm_res/nrm_rhs, nrm_res, nrm_rhs, time', &
+                  nvar, neq, non_zeros, norm2_residual/norm2_rhs, norm2_residual, norm2_rhs, elasped_time_BCYCLIC
+               
+            end if
+            
+            
+            if (s% min_chem_eqn_scale > 1d-6) &
+               write(*,*) '>>>>>> WARNING: min_chem_eqn_scale', s% min_chem_eqn_scale
+            
             stop 'testing solve_abtilu from star_solver'
          
          end subroutine test_solve_abtilu
+            
+            
+            
+         real(dp) function getA(i,j)
+            integer, intent(in) :: i,j
+            integer :: k, var, equ
+            include 'formats'
+            k = (i-1)/nvar + 1
+            var = i - nvar*(k-1)
+            equ = j - nvar*(k-1)
+            if (equ <= 0) then
+               getA = lblk(var,equ+nvar,k)
+            else if (equ <= nvar) then
+               getA = dblk(var,equ,k)
+            else ! equ > nvar
+               getA = ublk(var,equ-nvar,k)
+            end if
+            !if (i == j) write(*,6) 'i j k var equ A(i,j)', i, j, k, var, equ, getA
+         end function getA
+            
+         subroutine solve_with_DGBSVX(nvar,nz)
+            integer, intent(in) :: nvar, nz
+            character(len=1) :: EQUED, FACT, TRANS
+            integer :: INFO, KL, KU, LDAB, LDAFB, LDB, LDX, N, NRHS
+            real(dp) :: RCOND
+            integer, allocatable :: IPIV(:), IWORK(:)
+            real(dp), allocatable :: AB(:,:), AFB(:,:), B(:,:), &
+               BERR(:), C(:), FERR(:), R(:), WORK(:), X(:,:)
+            include 'formats'
+            FACT = 'E'
+            TRANS = 'N'
+            N = nvar*nz
+            KL = (2*nvar-1) ! subdiagonals
+            KU = (2*nvar-1) ! superdiagonals
+            NRHS = 1
+            LDAB = KL+KU+1
+            LDAFB = 2*KL+KU+1
+            LDB = neq
+            LDX = neq
+            allocate(AB(LDAB,N), AFB(LDAFB,N), IPIV(N), R(N), C(N), &
+               B(LDB,NRHS), X(LDX,NRHS), FERR(NRHS), BERR(NRHS), &
+               WORK(3*N), IWORK(N))
+            AB = 0d0; AFB = 0d0; R = 0d0; C = 0d0; B = 0d0; X = 0d0
+            WORK = 0d0; BERR = 0d0; FERR = 0d0; IPIV = 0; IWORK = 0
+            do j=1,N
+               do i=max(1,j-KU),min(N,j+KL)
+                  AB(KU+1+i-j,j) = getA(i,j)
+                  !if (i==j) write(*,2) 'diag', i, AB(KU+1+i-j,j)
+               end do
+               B(j,1) = b1(j)
+            end do
+            !write(*,3) 'dblk(nvar,nvar,nz)', nvar,nz, dblk(nvar,nvar,nz)
+            INFO = 0
+            call DGBSVX( FACT, TRANS, N, KL, KU, NRHS, AB, LDAB, AFB, &
+                         LDAFB, IPIV, EQUED, R, C, B, LDB, X, LDX, &
+                         RCOND, FERR, BERR, WORK, IWORK, INFO )
+            if (INFO < 0) then
+               write(*,2) 'illegal ith arg for DGBSVX', INFO
+            else if (INFO > 0) then
+               if (INFO <= N) then
+                  write(*,3) 'diag element is zero', INFO, N
+               else 
+                  write(*,1) 'bad RCOND'
+               end if
+            else
+               write(*,1) 'ok result from DGBSVX'
+            end if
+            write(*,1) 'RCOND', RCOND
+            write(*,1) 'FERR', FERR(1)
+            write(*,1) 'BERR', BERR(1)
+            write(*,*)
+         end subroutine solve_with_DGBSVX
 
 
          logical function solve_equ()

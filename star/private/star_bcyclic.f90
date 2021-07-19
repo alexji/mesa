@@ -657,6 +657,7 @@
             call DGESVX(fact, trans, nvar, nrhs, a, nvar, af, nvar, ipiv, &
                         equed, r, c, b, nvar, x, nvar, rcond, ferr, berr, &
                         work, iwork, ierr)
+            s% xtra1_array(k) = rcond
                
             if (ierr > 0 .and. ierr <= nvar) then ! singular
                write(*,3) 'singular matrix for DGESVX', k, ierr
@@ -665,6 +666,73 @@
             if (ierr == nvar+1) then ! means bad rcond, but may not be fatal
                write(*,2) 'DGESVX reports bad matrix conditioning: k, rcond', k, rcond
                ierr = 0
+               
+               do j=1,nvar
+                  write(*,'(a6)',advance='no') trim(s% nameofvar(j))
+                  do i=1,nvar
+                     write(*,'(e10.2)',advance='no') mtxF(i,j)
+                  end do
+                  write(*,*)
+               end do
+               stop 'DGESVX err'
+               
+               
+               
+            end if
+            
+            if (k == -2081) then
+               write(*,2) 'DGESVX conditioning: k, rcond', k, rcond
+               write(*,'(11x)',advance='no')
+               do j=1,nvar
+                  write(*,'(i10)',advance='no') j
+               end do
+               write(*,*)
+               do j=1,nvar
+                  write(*,'(a6,i5)',advance='no') trim(s% nameofvar(j)), j
+                  do i=1,nvar
+                     write(*,'(e10.2)',advance='no') mtxF(i,j)
+                  end do
+                  write(*,*)
+               end do
+               
+               write(*,3) 'diagonals', k, s% nz
+               do j=1,nvar
+                  write(*,'(a6,i5)',advance='no') trim(s% nameofvar(j)), j
+                  write(*,'(e10.2)',advance='no') mtxF(j,j)
+                  if (j > s% nvar_hydro) then
+                     write(*,'(e15.5)',advance='no') s% xa(j-s% nvar_hydro,k)
+                  else if (j == s% i_lnd) then
+                     write(*,'(e15.5)',advance='no') s% lnd(k)/ln10
+                  else if (j == s% i_lnT) then
+                     write(*,'(e15.5)',advance='no') s% lnT(k)/ln10
+                  else if (j == s% i_lnR) then
+                     write(*,'(e15.5)',advance='no') s% lnR(k)/ln10
+                  else if (j == s% i_lum) then
+                     write(*,'(e15.5)',advance='no') s% L(k)
+                  end if
+                  write(*,*)
+               end do
+
+               write(*,3) 'only large magnitude diagonals', k, s% nz
+               do j=1,nvar
+                  if (abs(mtxF(j,j)) > 1d8) then
+                     write(*,'(a6,i5)',advance='no') trim(s% nameofvar(j)), j
+                     write(*,'(e10.2)',advance='no') mtxF(j,j)
+                     if (j > s% nvar_hydro) then
+                        write(*,'(e15.5)',advance='no') s% xa(j-s% nvar_hydro,k)
+                     else if (j == s% i_lnd) then
+                        write(*,'(e15.5)',advance='no') s% lnd(k)/ln10
+                     else if (j == s% i_lnT) then
+                        write(*,'(e15.5)',advance='no') s% lnT(k)/ln10
+                     else if (j == s% i_lnR) then
+                        write(*,'(e15.5)',advance='no') s% lnR(k)/ln10
+                     else if (j == s% i_lum) then
+                        write(*,'(e15.5)',advance='no') s% L(k)
+                     end if
+                     write(*,*)
+                  end if
+               end do
+               stop 'DGESVX err'
             end if
             
             do i=1,nvar
