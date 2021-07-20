@@ -190,7 +190,9 @@
 
 
 
-      op_split_burn_min_T = 1d6
+
+
+
 
       min_chem_eqn_scale = 1d-16
       x_logical_ctrl(19) = .true. ! testing abtilu
