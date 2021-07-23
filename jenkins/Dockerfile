@@ -11,6 +11,7 @@ RUN apt-get update && \
       tcsh \
       git \
       git-lfs \
+      ruby \
       && \
     apt-get autoremove --purge -y && \
     apt-get autoclean -y && \
@@ -19,3 +20,4 @@ ADD http://www.astro.wisc.edu/~townsend/resource/download/mesasdk/mesasdk-x86_64
 RUN tar xzf /tmp/mesasdk-*.tar.gz -C /opt/ && rm /tmp/mesasdk-*.tar.gz
 ENV MESASDK_ROOT=/opt/mesasdk
 RUN bash $MESASDK_ROOT/bin/mesasdk_init.sh
+RUN gem install mesa_test
