@@ -35,7 +35,7 @@ pipeline {
         }
         sh '''#!/bin/bash -ex
           source $MESASDK_ROOT/bin/mesasdk_init.sh
-          mesa_test install_and_test
+          mesa_test install_and_test --no-checkout
         '''
       }
     }
