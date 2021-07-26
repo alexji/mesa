@@ -1032,7 +1032,7 @@
             logical :: &
                debug, use_A, verbose, equilibrate, use_mgmres, write_MUMPS, write_MM
             real(dp) :: tol_abs, tol_rel, norm2_residual, norm2_rhs, elasped_time_BCYCLIC
-            integer :: ierr, nz_test, i, iters, neq, non_zeros, iounit
+            integer :: ierr, nz_test, i, iters, neq, non_zeros
             real(dp), allocatable :: A(:,:)
             real(dp), dimension(:), allocatable :: DR, DC ! (neq)
             integer(8) :: time0, time1, clock_rate
@@ -1205,20 +1205,6 @@
                !call get_MM_filename('test_soln', nvar, fname)
                !call write_MM_vec(nvar, nz_test, soln1, fname)
                write(*,*) 'test_*.mm'
-               open(newunit=iounit, file=trim('test_vars.txt'), action='write', status='replace')
-               !do k=1,nz_test
-               do k=81,81
-                  do i=1,nvar
-                     if (i > s% nvar_hydro) then
-                        write(iounit,2) trim(s% nameofvar(i)), k, s% xa(i - s% nvar_hydro, k)
-                     else
-                        write(iounit,2) trim(s% nameofvar(i)), k, s% xh(i, k), s% xh(i, k)/ln10
-                     end if
-                  end do
-               end do
-               close(iounit)
-                  
-                  
                
                if (.false.) then
                   call get_scaling_vectors( &
@@ -1242,7 +1228,6 @@
                   call write_MM_mxt(nvar, nz_test, ublk, dblk, lblk, 'test_eq_A.mm', non_zeros)
                   call write_MM_vec(nvar, nz_test, b1, 'test_eq_b.mm')
                   call write_MM_vec(nvar, nz_test, soln1, 'test_eq_soln.mm')
-                  
                   write(*,*) 'test_eq_*.mm'
                end if
                

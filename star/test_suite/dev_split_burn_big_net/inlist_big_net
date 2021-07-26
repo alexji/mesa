@@ -11,13 +11,13 @@
 
       change_initial_net = .true.
       
-      !new_net_name = 'mesa_12.net'
+      new_net_name = 'approx21_cr60_plus_co56.net'
+      !new_net_name = 'mesa_20.net'
       !new_net_name = 'mesa_28.net'
       !new_net_name = 'mesa_80.net'
       !new_net_name = 'mesa_128.net'
       !new_net_name = 'mesa_201.net'
       !new_net_name = 'mesa_330.net'
-      new_net_name = 'mesa_833.net'
 
       set_initial_age = .true.
       initial_age = 0
@@ -46,6 +46,11 @@
       ! limit max_model_number as part of test_suite
       max_model_number = 4000
       !max_number_retries = 37
+
+
+
+      min_chem_eqn_scale = 1d-16
+      x_logical_ctrl(19) = .true. ! testing abtilu
 
 ! wind
 
