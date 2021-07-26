@@ -22,7 +22,7 @@ pipeline {
       steps {
         dir("${env.HOME}/.mesa_test") {
           writeYaml file: "config.yml", overwrite: true, data: [
-            'computer_name': env.NODE_NAME,
+            'computer_name': 'Jenkins',
             'email': env.MESA_TEST_USR,
             'password': env.MESA_TEST_PSW,
             'logs_token': env.MESA_LOGS_TOKEN,
