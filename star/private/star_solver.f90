@@ -1934,5 +1934,118 @@
          lwork = neq*(7*nvar + 10)
       end subroutine get_solver_work_sizes
 
+      
+      subroutine write_MM_mxt( &
+            nvar, nz, ublk, dblk, lblk, filename, non_zeros)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:,:,:), intent(in) :: & ! (nvar,nvar,nz)
+            ublk, dblk, lblk
+         character (len=*), intent(in) :: filename
+         integer, intent(out) :: non_zeros
+         integer :: neq, iounit
+         neq = nvar*nz
+         non_zeros = 0d0
+         call for_each_nonzero(.false.)
+         
+         open(newunit=iounit, file=trim(filename), action='write', status='replace')
+         write(iounit, '(a)') '%%MatrixMarket matrix coordinate real general'
+         write(iounit, '(a)') '% mesa/star'
+         write(iounit, '(3i8)') neq, neq, non_zeros
+         call for_each_nonzero(.true.)
+         close(iounit)
+         
+         contains
+         
+         real(dp) function check(v)
+            real(dp), intent(in) :: v
+            if (abs(v) < 1d-99) then
+               check = 0d0
+            else
+               check = v
+            end if
+         end function check
+         
+         subroutine for_each_nonzero(write_flag)
+            logical, intent(in) :: write_flag
+            integer :: i, j, k, r, c
+            do k=1,nz
+               do i=1,nvar 
+                  r = (k-1)*nvar + i
+                  if (k > 1) then
+                     c = (k-2)*nvar
+                     do j=1,nvar
+                        call do1(r, c+j, lblk(i,j,k), write_flag)
+                     end do
+                  end if
+                  c = (k-1)*nvar
+                  do j=1,nvar
+                     call do1(r, c+j, dblk(i,j,k), write_flag)
+                  end do
+                  if (k < nz) then
+                     c = k*nvar
+                     do j=1,nvar
+                        call do1(r, c+j, ublk(i,j,k), write_flag)
+                     end do
+                  end if
+               end do
+            end do
+         end subroutine for_each_nonzero
+         
+         subroutine do1(r,c,v,write_flag)
+            integer, intent(in) :: r, c
+            real(dp), intent(in) :: v
+            logical, intent(in) :: write_flag
+            real(dp) :: x
+            x = check(v)
+            if (x == 0d0) return
+            if (write_flag) then
+               write(iounit, '(2i8,1e26.16)') r, c, x
+            else
+               non_zeros = non_zeros + 1
+            end if
+         end subroutine do1
+         
+      end subroutine write_MM_mxt
+
+      subroutine write_MM_vec(nvar, nz, b1, filename)
+         integer, intent(in) :: nvar, nz
+         real(dp), dimension(:), intent(in) :: b1 ! (nvar*nz)
+         character (len=*), intent(in) :: filename
+         integer :: neq, k, iounit
+         neq = nvar*nz         
+         open(newunit=iounit, file=trim(filename), action='write', status='replace')
+         write(iounit, '(a)') '%%MatrixMarket matrix array real general'
+         write(iounit, '(a)') '% mesa/star'
+         write(iounit, '(2i8)') neq, 1
+         do k=1,neq
+            write(iounit, '(1e26.16)') check(b1(k))
+         end do
+         close(iounit)
+         
+         contains
+         
+         real(dp) function check(v)
+            real(dp), intent(in) :: v
+            if (abs(v) < 1d-99) then
+               check = 0d0
+            else
+               check = v
+            end if
+         end function check
+
+      end subroutine write_MM_vec
+         
+      subroutine get_MM_filename(str, nvar, fname)
+         character(len=*) :: str, fname
+         integer :: nvar
+         if (nvar < 10) then
+            write(fname,'(a,i1,a)') trim(str) // '_nvar_00', nvar, '.mm'
+         else if (nvar < 100) then
+            write(fname,'(a,i2,a)') trim(str) // '_nvar_0', nvar, '.mm'
+         else 
+            write(fname,'(a,i3,a)') trim(str) // '_nvar_', nvar, '.mm'
+         end if
+      end subroutine get_MM_filename
+
 
       end module star_solver
