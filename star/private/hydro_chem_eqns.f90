@@ -138,6 +138,7 @@
             dxdt_factor = 1d0
 
             eqn_scale = max(s% min_chem_eqn_scale, s% x_scale(i,k)/s% dt)
+            s% residual_weight(j,k) = max(1d0, s% x_scale(i,k)/s% dt)
             residual = (dxdt_expected - dxdt_actual)/eqn_scale
             s% equ(i,k) = residual
             
