@@ -1174,7 +1174,7 @@
          integer, pointer :: index(:) 
          integer :: item_order(max_num_items)
          integer :: ierr, omp_num_threads, item_num, num_items, i, j
-         real(dp) :: total, misc, tmp
+         real(dp) :: total, misc, tmp, check_total_times
          include 'formats'
          ierr = 0
          omp_num_threads = utils_OMP_GET_MAX_THREADS()
@@ -1213,7 +1213,16 @@
          call save1('hydro_vars', s% time_set_hydro_vars, total)
          call save1('mixing_info', s% time_set_mixing_info, total)
          call save1('evolve_step', s% time_evolve_step, total)
+         check_total_times = star_total_times(s)
+         if (abs(total - check_total_times) > 1d-14*total) then
+            write(*,2) 'bad time accounting', s% model_number, total, check_total_times
+            stop 'run_star_support show_times'
+         end if
          call save1('run1_star', s% job% elapsed_time - total, total)
+         if (abs(total - s% job% elapsed_time) > 1d-14*total) then
+            write(*,2) 'bad time elapsed_time', s% model_number, total, s% job% elapsed_time
+            stop 'run_star_support show_times'
+         end if
          tmp = 0
          call save1('total', total, tmp)
          
@@ -1228,7 +1237,7 @@
             if (item_values(j) == 0d0) cycle
             write(*,'(a50,2f9.3)') trim(item_names(j)), &
                item_values(j), item_values(j)/total
-            if (j == num_items) write(*,*)
+            !if (j == num_items) write(*,*)
          end do
          
          if (s% job% step_loop_timing/s% job% elapsed_time < 0.9d0) then

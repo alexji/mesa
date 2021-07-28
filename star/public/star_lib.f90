@@ -564,6 +564,14 @@
          if (s% doing_timing) &
             call update_time(s, time0, total, s% time_evolve_step, 'evolve_step')         
       end function star_evolve_step
+      
+      
+      real(dp) function star_total_times(s)
+         use star_utils, only: total_times
+         type (star_info), pointer :: s
+         star_total_times = total_times(s)
+      end function star_total_times
+      
 
       ! individual functions to evolve each of the parts of star_evolve_step
       integer function star_evolve_step_part1(id, first_try)
