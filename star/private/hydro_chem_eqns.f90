@@ -75,7 +75,7 @@
             dq, dm, dequ, dxdt_nuc, dxdt_mix, max_abs_residual, &
             sum_dxdt_nuc, dx_expected_dlnd, dx_expected_dlnT, &
             d_dxdt_mix_dx00, d_dxdt_mix_dxm1, d_dxdt_mix_dxp1, &
-            sum_dx_burning, sum_dx_mixing, residual, &
+            sum_dx_burning, sum_dx_mixing, residual, resid_scale, &
             dxdt_factor, alpha, eqn_scale, d_dxdt_dx, &
             dequ_dlnd, dequ_dlnT, dequ_dlnPgas_const_T, dequ_dlnT_const_Pgas
          logical :: test_partials, doing_op_split_burn
@@ -137,7 +137,10 @@
 
             dxdt_factor = 1d0
 
+            resid_scale = max(1d-16, s% x_scale(i,k)/s% dt)
             eqn_scale = max(s% min_chem_eqn_scale, s% x_scale(i,k)/s% dt)
+            s% residual_weight(j,k) = resid_scale/eqn_scale ! multiply residual by this for testing convergence
+            
             residual = (dxdt_expected - dxdt_actual)/eqn_scale
             s% equ(i,k) = residual
             

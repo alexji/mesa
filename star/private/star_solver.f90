@@ -1023,8 +1023,9 @@
          logical function solve_equ()
             use star_utils, only: start_time, update_time
             use rsp_def, only: NV, MAX_NZN
-            integer ::  i, k, ierr
+            integer ::  i, k, ierr, nnz
             real(dp) :: ferr, berr, total_time
+            character (len=128) :: fname
 
             include 'formats'
             ierr = 0
@@ -1038,6 +1039,23 @@
             do i=1,neq
                b1(i) = -equ1(i)
             end do
+
+            if (s% x_logical_ctrl(27) .and. &
+                  s% model_number == s% x_integer_ctrl(27)) then
+               call get_MM_filename('test_A', nvar, fname)
+               write(*,*) trim(fname)
+               call write_MM_mxt(nvar, nz, ublk, dblk, lblk, fname, nnz)
+               call get_MM_filename('test_b', nvar, fname)
+               write(*,*) trim(fname)
+               call write_MM_vec(nvar, nz, b1, fname)
+               write(*,1) 'A num_non_zeros/(3*nz*nvar*nvar)', dble(nnz)/dble(3*nvar*nvar*nz)
+               write(*,2) 'nvar', nvar
+               write(*,2) 'nz', nz
+               write(*,2) 'nz*nvar', nz*nvar
+               write(*,2) 'nnz', nnz
+               write(*,*)
+               stop 'done saving files in matrix market format'
+            end if
             
             if (s% use_DGESVX_in_bcyclic) then
                !$omp simd
