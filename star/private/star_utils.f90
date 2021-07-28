@@ -1935,24 +1935,31 @@
       end subroutine start_time
 
 
-      subroutine update_time(s, time0, total_all_before, total)
+      subroutine update_time(s, time0, total_all_before, total, str)
          type (star_info), pointer :: s
          integer(8), intent(in) :: time0
          real(dp), intent(in) :: total_all_before
          real(dp), intent(inout) :: total
+         character (len=*), intent(in) :: str
          real(dp) :: total_all_after, other_stuff
          integer(8) :: time1, clock_rate
+         include 'formats'
          if (.not. s% doing_timing) return
          call system_clock(time1,clock_rate)
          total_all_after = total_times(s)
          other_stuff = total_all_after - total_all_before
             ! don't double count any other stuff
          total = total + (dble(time1-time0)/clock_rate - other_stuff)
+         if (total < 0d0) then
+            write(*,2) 'total ' // trim(str), s% model_number, total
+            stop 'update_time'
+         end if
       end subroutine update_time
 
 
       real(dp) function total_times(s)
          type (star_info), pointer :: s
+         include 'formats'
          total_times = &
             s% time_evolve_step + &
             s% time_remesh + &
@@ -1970,6 +1977,10 @@
             s% time_mlt + &
             s% time_set_hydro_vars + &
             s% time_set_mixing_info
+         if (total_times < 0d0) then
+            write(*,2) 'total times', s% model_number, total_times
+            stop 'total_times'
+         end if
       end function total_times
 
       

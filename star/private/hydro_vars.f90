@@ -629,7 +629,7 @@
          end if
 
          if (s% doing_timing) &
-            call update_time(s, time0, total, s% time_set_hydro_vars)
+            call update_time(s, time0, total, s% time_set_hydro_vars, 'set_hydro_vars')
          
          s% need_to_setvars = .false.
 

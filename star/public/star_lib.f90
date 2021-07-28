@@ -561,7 +561,8 @@
          star_evolve_step = star_evolve_step_part1(id, first_try)
          if (star_evolve_step == keep_going) &
             star_evolve_step = star_evolve_step_part2(id, first_try)
-         if (s% doing_timing) call update_time(s, time0, total, s% time_evolve_step)         
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_evolve_step, 'evolve_step')         
       end function star_evolve_step
 
       ! individual functions to evolve each of the parts of star_evolve_step

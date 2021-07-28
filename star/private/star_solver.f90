@@ -1079,7 +1079,7 @@
             end if
 
             if (s% doing_timing) then
-               call update_time(s, time0, total_time, s% time_solver_matrix)
+               call update_time(s, time0, total_time, s% time_solver_matrix, 'solver_matrix')
             end if
             if (ierr /= 0) then
                solve_equ = .false.

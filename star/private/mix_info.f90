@@ -387,7 +387,7 @@
          if (failed('set_mixing_info')) return
 
          if (s% doing_timing) &
-            call update_time(s, time0, total, s% time_set_mixing_info)
+            call update_time(s, time0, total, s% time_set_mixing_info, 'set_mixing_info')
 
          s% have_mixing_info = .true.
 

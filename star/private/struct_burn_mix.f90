@@ -49,7 +49,8 @@
          integer :: nz, nvar, species, ierr, j, k, k_bad
          integer(8) :: time0
          logical :: do_chem
-         real(dp) :: dt, tol_correction_norm, tol_max_correction, total
+         real(dp) :: dt, tol_correction_norm, tol_max_correction, &
+            total_energy, total_time
 
          include 'formats'
 
@@ -73,7 +74,7 @@
             if (do_struct_burn_mix /= keep_going) return
          end if
 
-         if (s% doing_timing) call start_time(s, time0, total)
+         if (s% doing_timing) call start_time(s, time0, total_time)
 
          s% doing_struct_burn_mix = .true.
          nz = s% nz
@@ -105,9 +106,9 @@
          end if
          
          if (s% do_burn .and. s% op_split_burn) then
-            total = 0
+            total_energy = 0
             do k=1,s% nz
-               total = total - s% energy(k)*s% dm(k)
+               total_energy = total_energy - s% energy(k)*s% dm(k)
             end do
             if (s% trace_evolve) write(*,*) 'call do_burn'
             do_struct_burn_mix = do_burn(s, dt)
@@ -119,9 +120,9 @@
             call set_vars_if_needed(s, s% dt, 'after do_burn', ierr)
             if (ierr /= 0) return            
             do k=1,s% nz
-               total = total + s% energy(k)*s% dm(k)
+               total_energy = total_energy + s% energy(k)*s% dm(k)
             end do
-            s% non_epsnuc_energy_change_from_split_burn = total
+            s% non_epsnuc_energy_change_from_split_burn = total_energy
             if (s% trace_evolve) write(*,*) 'done do_burn'
          end if
          
@@ -202,7 +203,8 @@
 
          s% solver_iter = 0 ! to indicate that no longer doing solver iterations
          s% doing_struct_burn_mix = .false.
-         if (s% doing_timing) call update_time(s, time0, total, s% time_struct_burn_mix)
+         if (s% doing_timing) &
+            call update_time(s, time0, total_time, s% time_struct_burn_mix, 'struct_burn_mix')
          
          contains
          
@@ -363,7 +365,6 @@
          use mtx_lib
          use mtx_def
          use num_def
-         use star_utils, only: start_time, update_time
 
          type (star_info), pointer :: s
          integer, intent(in) :: nvar
@@ -1021,7 +1022,7 @@
          s% need_to_setvars = .true.
          
          if (s% doing_timing) &
-            call update_time(s, time0, total, s% time_solve_burn)
+            call update_time(s, time0, total, s% time_solve_burn, 'solve_burn')
             
          if (ierr /= 0) then
             if (s% report_ierr) write(*,2) 'do_burn failed', k_bad

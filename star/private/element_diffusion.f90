@@ -434,7 +434,8 @@
             s% g_field_element_diffusion(k) = 0d0 ! s% g_field_element_diffusion(nzhi)
          end do
 
-         if (s% doing_timing) call update_time(s, time0, total, s% time_element_diffusion)
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_element_diffusion, 'element_diffusion')
 
          contains
 

@@ -297,7 +297,8 @@
                call solve_for_corrections(s,iter)
                call apply_corrections(s, &
                   DXH,DXXT,DXXC,DXXE,DXXL,EZH,kT_max,kW_max,kE_max,kL_max)
-               if (s% doing_timing) call update_time(s, time0, total, s% time_solver_matrix)
+               if (s% doing_timing) &
+                  call update_time(s, time0, total, s% time_solver_matrix, 'solver_matrix')
                if (dbg_msg) call write_msg
 ! write(*,3) 'RSP HYD w', 22, iter, s% RSP_w(22)
                if (iter == 1) cycle iter_loop
@@ -711,7 +712,8 @@
             call calc_Prad(s,i)
          end do
          !$OMP END PARALLEL DO
-         if (s% doing_timing) call update_time(s, time0, total, s% time_eos)
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_eos, 'eos')
          if (ierr /= 0) return
          !$OMP PARALLEL DO PRIVATE(I) SCHEDULE(dynamic,2)
          do i = i_min,i_max

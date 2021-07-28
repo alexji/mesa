@@ -138,7 +138,8 @@ contains
           if (op_err /= 0) ierr = op_err
        end do
        !$OMP END PARALLEL DO
-       if (s% doing_timing) call update_time(s, time0, total, s% time_neu_kap)
+       if (s% doing_timing) &
+          call update_time(s, time0, total, s% time_neu_kap, 'neu_kap')
        if (ierr /= 0) then
           if (s% report_ierr) write(*,*) 'do1_neu_kap returned ierr', ierr
           return
@@ -170,7 +171,8 @@ contains
       if (dbg) write(*,*) 'call do_eos'
       if (s% doing_timing) call start_time(s, time0, total)
       call do_eos(s,nzlo,nzhi,ierr)
-      if (s% doing_timing) call update_time(s, time0, total, s% time_eos)
+      if (s% doing_timing) &
+         call update_time(s, time0, total, s% time_eos, 'eos')
       if (ierr /= 0) then
          if (s% report_ierr) write(*,*) 'do_eos returned ierr', ierr
          return

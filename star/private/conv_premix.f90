@@ -196,7 +196,8 @@ contains
     ! Finish
     s% need_to_setvars = .true.
 
-    if (s% doing_timing) call update_time(s, time0, total, s% time_conv_premix)
+    if (s% doing_timing) &
+       call update_time(s, time0, total, s% time_conv_premix, 'conv_premix')
     
     return
 

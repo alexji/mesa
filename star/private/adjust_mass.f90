@@ -527,7 +527,8 @@
          call dealloc
          
 
-         if (s% doing_timing) call update_time(s, time0, total, s% time_adjust_mass)
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_adjust_mass, 'adjust_mass')
 
          if (dbg_adjm) stop 'debugging: do_adjust_mass'
          if (dbg) write(*,*) 'do_adjust_mass return'

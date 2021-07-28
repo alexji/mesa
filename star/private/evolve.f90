@@ -1953,7 +1953,8 @@
             if (do_mesh /= keep_going .and. s% report_ierr) &
                write(*, *) 'do_mesh: remesh failed'
          end if
-         if (s% doing_timing) call update_time(s, time0, total, s% time_remesh)
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_remesh, 'remesh')
          if (do_mesh /= keep_going) then
             s% result_reason = adjust_mesh_failed
             return

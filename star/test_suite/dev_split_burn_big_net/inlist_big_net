@@ -11,7 +11,13 @@
 
       change_initial_net = .true.
       !new_net_name = 'mesa_201.net'
-      new_net_name = 'mesa_80.net' ! good enough for testing
+      !new_net_name = 'mesa_80.net'
+      new_net_name = 'mesa_100.net'
+      !new_net_name = 'mesa_128.net'
+      !new_net_name = 'mesa_160.net'
+      !new_net_name = 'mesa_201.net'
+      !new_net_name = 'mesa_235.net'
+      !new_net_name = 'mesa_330.net'
 
       set_initial_age = .true.
       initial_age = 0

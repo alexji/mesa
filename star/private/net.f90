@@ -120,7 +120,8 @@
                if (ierr /= 0) exit
             end do
          end if
-         if (s% doing_timing) call update_time(s, time0, total, s% time_nonburn_net)
+         if (s% doing_timing) &
+            call update_time(s, time0, total, s% time_nonburn_net, 'nonburn_net')
 
       end subroutine do_net
 

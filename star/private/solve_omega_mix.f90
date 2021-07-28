@@ -324,7 +324,7 @@
          call dealloc
 
          if (s% doing_timing) &
-            call update_time(s, time0, total, s% time_solve_omega_mix)
+            call update_time(s, time0, total, s% time_solve_omega_mix, 'solve_omega_mix')
 
 
          contains
