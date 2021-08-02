@@ -717,6 +717,7 @@
             !$OMP critical (tdc_crit0)
                write(*,5) 'failed get_TDC_solution k slvr_iter model TDC_iter', &
                   k, s% solver_iter, s% model_number, iter
+               write(*,*) 'q(k)', s% q(k)
                write(*,*) 'Q_start', Q_start%val
                write(*,*) 'Y_start', Y_start%val
                write(*,2) 'Q', k, Q%val
